@@ -1,0 +1,174 @@
+{
+    "good": [
+      "{}",
+      "flawless {}",
+      "perfect {}",
+      "unblemished {}",
+      "{} without flaw",
+      "{} without defect",
+      "{} without damage",
+      "{} in ideal condition",
+      "{} with immaculate quality",
+      "{} without any imperfections"
+    ],
+    "bent": [
+      "{} has a bent defect",
+      "flawed {} with a bent",
+      "a bend found in {}",
+      "{} with noticeable bending",
+      "a bent edge on {}",
+      "{} has a slight curve defect"
+    ],
+    "broken": [
+      "{} has a broken defect",
+      "flawed {} with breakage",
+      "visible breakage on {}",
+      "{} with broken areas",
+      "{} shows signs of breaking",
+      "cracked or broken spots on {}"
+    ],
+    "color": [
+      "{} has a color defect",
+      "inconsistent color on {}",
+      "{} with color discrepancies",
+      "{} has a noticeable color difference",
+      "{} with irregular coloring",
+      "{} has off-color patches"
+    ],
+    "combined": [
+      "{} has a combined defect",
+      "multiple issues with {}",
+      "{} with mixed defects",
+      "{} showing multiple imperfections",
+      "several flaws found on {}",
+      "{} with combined defect types"
+    ],
+    "contamination": [
+      "{} has a contamination defect",
+      "foreign particles on {}",
+      "{} is contaminated",
+      "{} contains contaminants",
+      "{} has impurity issues",
+      "traces of contamination on {}"
+    ],
+    "crack": [
+      "{} has a crack defect",
+      "a crack is present on {}",
+      "cracked area on {}",
+      "{} with noticeable cracking",
+      "fine cracks found on {}",
+      "{} shows surface cracks"
+    ],
+    "cut": [
+      "{} has a cut defect",
+      "cut marks on {}",
+      "{} with visible cuts",
+      "a cut detected on {}",
+      "{} is sliced or cut",
+      "surface cut seen on {}"
+    ],
+    "fabric": [
+      "{} has a fabric defect",
+      "{} has a fabric border defect",
+      "{} has a fabric interior defect",
+      "fabric quality issues on {}",
+      "{} with textile irregularities",
+      "fabric borders on {} show defects"
+    ],
+    "faulty_imprint": [
+      "{} has a faulty imprint defect",
+      "{} has a print defect",
+      "incorrect printing on {}",
+      "misaligned print on {}",
+      "printing errors present on {}",
+      "{} has a blurred print defect"
+    ],
+    "glue": [
+      "{} has a glue defect",
+      "{} has a glue strip defect",
+      "excess glue on {}",
+      "{} with uneven glue application",
+      "{} has visible glue spots",
+      "misplaced glue seen on {}"
+    ],
+    "hole": [
+      "{} has a hole defect",
+      "a hole on {}",
+      "visible hole on {}",
+      "{} with punctures",
+      "small hole found in {}",
+      "perforations present on {}"
+    ],
+    "missing": [
+      "{} has a missing defect",
+      "flawed {} with something missing",
+      "{} has missing components",
+      "missing parts on {}",
+      "{} shows absent pieces",
+      "certain parts missing from {}"
+    ],
+    "poke": [
+      "{} has a poke defect",
+      "{} has a poke insulation defect",
+      "visible poke mark on {}",
+      "{} has puncture marks",
+      "a poke flaw on {}",
+      "small poke defect on {}"
+    ],
+    "rough": [
+      "{} has a rough defect",
+      "rough texture on {}",
+      "uneven surface on {}",
+      "{} is coarser than expected",
+      "surface roughness seen on {}",
+      "texture defects on {}"
+    ],
+    "scratch": [
+      "{} has a scratch defect",
+      "flawed {} with a scratch",
+      "visible scratches on {}",
+      "{} with surface scratches",
+      "minor scratches seen on {}",
+      "{} shows scratch marks"
+    ],
+    "squeeze": [
+      "{} has a squeeze defect",
+      "flawed {} with a squeeze",
+      "squeezed area on {}",
+      "{} has compression marks",
+      "{} appears squeezed",
+      "flattened areas on {}"
+    ],
+    "thread": [
+      "{} has a thread defect",
+      "flawed {} with a thread",
+      "loose threads on {}",
+      "{} has visible threads",
+      "untrimmed threads on {}",
+      "threads sticking out on {}"
+    ],
+    "liquid": [
+      "{} has a liquid defect",
+      "flawed {} with liquid",
+      "{} with oil",
+      "liquid marks on {}",
+      "{} with liquid residue",
+      "stains from liquid on {}"
+    ],
+    "misplaced": [
+      "{} has a misplaced defect",
+      "flawed {} with misplacing",
+      "{} shows misalignment",
+      "misplaced parts on {}",
+      "{} with incorrect positioning",
+      "positioning defects on {}"
+    ],
+    "damaged": [
+      "{} has a damaged defect",
+      "flawed {} with damage",
+      "{} with visible damage",
+      "damaged areas on {}",
+      "physical damage seen on {}",
+      "noticeable wear on {}"
+    ]
+}

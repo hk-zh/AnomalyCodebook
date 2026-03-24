@@ -1,0 +1,36 @@
+26-03-20 14:44:03.192 - INFO: train_data_path: ./data/mvtec
+26-03-20 14:44:03.192 - INFO: save_path: ./exps/mvtec/
+26-03-20 14:44:03.192 - INFO: config_path: ./open_clip/model_configs/ViT-L-14-336.json
+26-03-20 14:44:03.192 - INFO: dataset: mvtec
+26-03-20 14:44:03.192 - INFO: model: ViT-L-14-336
+26-03-20 14:44:03.192 - INFO: pretrained: openai
+26-03-20 14:44:03.192 - INFO: features_list: [6, 12, 18, 24]
+26-03-20 14:44:03.192 - INFO: codebook_num_learnable: 64
+26-03-20 14:44:03.192 - INFO: epoch: 10
+26-03-20 14:44:03.192 - INFO: learning_rate: 0.001
+26-03-20 14:44:03.192 - INFO: batch_size: 8
+26-03-20 14:44:03.192 - INFO: image_size: 518
+26-03-20 14:44:03.192 - INFO: aug_rate: 0.2
+26-03-20 14:44:03.192 - INFO: print_freq: 1
+26-03-20 14:44:03.192 - INFO: save_freq: 1
+26-03-20 14:44:03.192 - INFO: seed: 42
+26-03-20 14:56:19.476 - INFO: epoch [1/10], total_loss: 5.9233, construction_loss: 4.0874, vq_loss: 1.8360
+26-03-20 14:56:19.535 - INFO: Saved checkpoint to ./exps/mvtec/epoch_1.pth
+26-03-20 15:07:09.239 - INFO: epoch [2/10], total_loss: 4.7921, construction_loss: 3.4152, vq_loss: 1.3769
+26-03-20 15:07:09.296 - INFO: Saved checkpoint to ./exps/mvtec/epoch_2.pth
+26-03-20 15:17:56.975 - INFO: epoch [3/10], total_loss: 4.5082, construction_loss: 3.2412, vq_loss: 1.2670
+26-03-20 15:17:57.033 - INFO: Saved checkpoint to ./exps/mvtec/epoch_3.pth
+26-03-20 15:28:39.930 - INFO: epoch [4/10], total_loss: 4.5469, construction_loss: 3.2154, vq_loss: 1.3316
+26-03-20 15:28:39.988 - INFO: Saved checkpoint to ./exps/mvtec/epoch_4.pth
+26-03-20 15:39:32.568 - INFO: epoch [5/10], total_loss: 4.5437, construction_loss: 3.2459, vq_loss: 1.2977
+26-03-20 15:39:32.625 - INFO: Saved checkpoint to ./exps/mvtec/epoch_5.pth
+26-03-20 15:50:33.917 - INFO: epoch [6/10], total_loss: 4.5907, construction_loss: 3.2143, vq_loss: 1.3765
+26-03-20 15:50:33.976 - INFO: Saved checkpoint to ./exps/mvtec/epoch_6.pth
+26-03-20 16:01:35.335 - INFO: epoch [7/10], total_loss: 4.4046, construction_loss: 3.0768, vq_loss: 1.3278
+26-03-20 16:01:35.392 - INFO: Saved checkpoint to ./exps/mvtec/epoch_7.pth
+26-03-20 16:12:26.014 - INFO: epoch [8/10], total_loss: 4.4842, construction_loss: 3.1347, vq_loss: 1.3495
+26-03-20 16:12:26.071 - INFO: Saved checkpoint to ./exps/mvtec/epoch_8.pth
+26-03-20 16:23:16.523 - INFO: epoch [9/10], total_loss: 4.4752, construction_loss: 3.0432, vq_loss: 1.4320
+26-03-20 16:23:16.581 - INFO: Saved checkpoint to ./exps/mvtec/epoch_9.pth
+26-03-20 16:34:07.845 - INFO: epoch [10/10], total_loss: 4.1824, construction_loss: 2.8882, vq_loss: 1.2942
+26-03-20 16:34:07.932 - INFO: Saved checkpoint to ./exps/mvtec/epoch_10.pth

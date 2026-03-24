@@ -4,6 +4,7 @@
 from torch import Tensor, nn
 import torch
 from torch.nn import functional as F
+import pdb
 
 class LinearLayer(nn.Module):
     def __init__(self, dim_in, dim_out, k, model):
@@ -23,67 +24,61 @@ class LinearLayer(nn.Module):
         return tokens
 
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
 class HybridCodebook(nn.Module):
-    def __init__(self, semantic_embeddings, num_learnable=128, embed_dim=768):
-        """
-        Args:
-            semantic_embeddings: Tensor of shape [num_classes, embed_dim] 
-                                derived from CLIP text encoder.
-            num_learnable: Number of entries the model can learn for 'normal' patterns.
-            embed_dim: The dimensionality of the CLIP latent space.
-        """
-        super().__init__()
-        
-        # 1. Frozen Semantic Part
-        # register_buffer ensures these are saved in the checkpoint but NOT updated by the optimizer.
-        # We normalize them immediately to place them on the CLIP hypersphere.
-        self.register_buffer(
-            "frozen_semantic_entries", 
-            F.normalize(semantic_embeddings, dim=-1)
-        )
-        self.num_semantic = self.frozen_semantic_entries.size(0)
-        
-        # 2. Learnable Part
-        # These are standard parameters that will be updated during training.
-        self.learnable_entries = nn.Parameter(torch.randn(num_learnable, embed_dim))
-        
-        # Proper initialization is key for learnable codebooks
-        nn.init.trunc_normal_(self.learnable_entries, std=0.02)
+	def __init__(self, semantic_embeddings, num_learnable=128, embed_dim=1024, beta=0.25):
+		super().__init__()
 
-    def get_full_codebook(self):
-        """
-        Returns the combined codebook where the first section is frozen text
-        and the second is the current state of learnable tokens.
-        """
-        # We normalize the learnable entries before concatenation so they 
-        # exist in the same vector space/scale as the CLIP embeddings.
-        learned_norm = F.normalize(self.learnable_entries, dim=-1)
-        
-        return torch.cat([self.frozen_semantic_entries, learned_norm], dim=0)
+		self.register_buffer(
+			"frozen_semantic_entries",
+			F.normalize(semantic_embeddings, dim=-1)
+		)
+		self.num_semantic = self.frozen_semantic_entries.size(0)
+		self.num_learnable = num_learnable
+		self.embed_dim = embed_dim
+		self.beta = beta
 
-def forward(self, x):
-        """
-        Args:
-            x: projected patch features [B, L, C]
-        Returns:
-            logits: similarity scores [B, L, Total_Entries]
-            selected_codes: the actual embeddings selected from the codebook [B, L, C]
-        """
-        # 1. Get the combined codebook (Frozen Semantics + Learnable Normals)
-        # Shape: [num_semantic + num_learnable, C]
-        codebook = self.get_full_codebook()
-        
-        # 2. Similarity calculation (dot product)
-        # Result shape: [B, L, Total_Entries]
-        logits = torch.matmul(x, codebook.t())
-        
-        # 3. Selection (Quantization)
-        # Find the index of the most similar codebook entry for each patch
-        # Shape: [B, L]
-        selected_indices = torch.argmax(logits, dim=-1)
-        
-        # 4. Retrieve the selected embeddings
-        # Shape: [B, L, C]
-        selected_codes = codebook[selected_indices]
-        
-        return logits, selected_codes
+		self.learnable_entries = nn.Parameter(torch.randn(num_learnable, embed_dim))
+		nn.init.trunc_normal_(self.learnable_entries, std=0.02)
+
+	def get_full_codebook(self):
+		learned_norm = F.normalize(self.learnable_entries, dim=-1)
+		return torch.cat([self.frozen_semantic_entries, learned_norm], dim=0)
+
+	def forward(self, x):
+		x = F.normalize(x, dim=-1)
+
+		codebook = self.get_full_codebook()					# [K, C]
+		logits = torch.matmul(x, codebook.t())				# [B, L, K]
+
+		indices = torch.argmax(logits, dim=-1)				# [B, L]
+		z_q = codebook[indices]								# [B, L, C]
+
+		z_q_st = x + (z_q - x).detach()
+
+		is_learnable = (indices >= self.num_semantic).float()	# [B, L]
+
+		# commitment: update x / encoder side
+		pos_sim_commit = F.cosine_similarity(x, z_q.detach(), dim=-1)   # [B, L]
+		commitment_loss = (1.0 - pos_sim_commit).mean()
+
+		# codebook: update learnable entries only
+		pos_sim_codebook = F.cosine_similarity(x.detach(), z_q, dim=-1) # [B, L]
+		per_token_codebook_loss = 1.0 - pos_sim_codebook
+		vq_loss = (per_token_codebook_loss * is_learnable).sum() / (is_learnable.sum() + 1e-6)
+
+		quant_loss = vq_loss + self.beta * commitment_loss
+
+		return {
+			"logits": logits,
+			"indices": indices,
+			"z_q": z_q,
+			"z_q_st": z_q_st,
+			"vq_loss": vq_loss,
+			"commitment_loss": commitment_loss,
+			"quant_loss": quant_loss,
+		}

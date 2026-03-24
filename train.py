@@ -91,8 +91,7 @@ def train(args):
     if not os.path.exists(save_path):
         os.makedirs(save_path)
     txt_path = os.path.join(save_path, 'log.txt')  # log
-
-    del configs
+    
     features_list = args.features_list
     with open(args.config_path, 'r') as f:
         model_configs = json.load(f)
@@ -155,8 +154,6 @@ def train(args):
     
 
 
-    optimizer = torch.optim.Adam(list(trainable_layer.parameters()), lr=learning_rate, betas=(0.5, 0.999))
-
     # losses
     loss_focal = FocalLoss()
     loss_dice = BinaryDiceLoss()
@@ -176,11 +173,19 @@ def train(args):
             text_prompts = encode_text_with_prompt_ensemble_real_iad(model, obj_list, tokenizer, device)
 
     # Hybrid Codebook
-    hybrid_codebook = HybridCodebook(semantic_embeddings, num_learnable=model_configs['codebook_num_learnable'], embed_dim=model_configs['vision_cfg']['width'])
+    hybrid_codebook = HybridCodebook(semantic_embeddings, num_learnable=args.codebook_num_learnable, embed_dim=model_configs['embed_dim']).to(device)
+
+    optimizer = torch.optim.Adam(
+        list(trainable_layer.parameters()) + list(hybrid_codebook.parameters()),
+        lr=learning_rate,
+        betas=(0.5, 0.999)
+)
 
     for epoch in range(epochs):
         print("EPOCH = ", epoch)
-        loss_list = []
+        total_loss_list = []
+        construction_loss_list = []
+        vq_loss_list = []
         idx = 0
         for items in tqdm(train_dataloader):
             idx += 1
@@ -212,12 +217,19 @@ def train(args):
                         
                     text_features = torch.stack(text_features, dim=0)
                 # pixel level
-                patch_tokens = trainable_layer(patch_tokens) # [4, 1, 1370]         
+                patch_tokens_list = trainable_layer(patch_tokens) # [4, 1, 1370]     patch tokens of all x layers    
 
+                vq_loss = 0.0
                 anomaly_maps = []
-                for layer in range(len(patch_tokens)):
-                    patch_tokens[layer] = patch_tokens[layer] / patch_tokens[layer].norm(dim=-1, keepdim=True)
-                    anomaly_map = ((patch_tokens[layer] @ text_features) / 0.01)
+                for i in range(len(patch_tokens_list)):
+                    patch_tokens = patch_tokens_list[i]
+                    ret = hybrid_codebook.forward(patch_tokens)
+
+            
+                    patch_tokens = ret['z_q_st']
+                    vq_loss = vq_loss + ret['quant_loss']
+                    patch_tokens = patch_tokens / patch_tokens.norm(dim=-1, keepdim=True)
+                    anomaly_map = ((patch_tokens @ text_features) / 0.01)
 
                     B, L, C = anomaly_map.shape
                     H = int(np.sqrt(L))
@@ -236,25 +248,42 @@ def train(args):
 
             # gt = gt.long()
 
-            # losses
-            loss = 0
+            # reconstruction losses
+            construction_loss = 0
             for num in range(len(anomaly_maps)):              
-                loss += loss_focal(anomaly_maps[num], img_mask) # a->xyz b->abc 21, 518,518
-                loss += loss_dice(torch.sum(anomaly_maps[num][:, 1:, :, :], dim=1), img_mask_b)
+                construction_loss += loss_focal(anomaly_maps[num], img_mask) # a->xyz b->abc 21, 518,518
+                construction_loss += loss_dice(torch.sum(anomaly_maps[num][:, 1:, :, :], dim=1), img_mask_b)
 
             optimizer.zero_grad()
+            loss = construction_loss + vq_loss
             loss.backward()
             optimizer.step()
-            loss_list.append(loss.item())
+            total_loss_list.append(loss.item())
+            construction_loss_list.append(construction_loss.item())
+            vq_loss_list.append(vq_loss.item())
 
         # logs
         if (epoch + 1) % args.print_freq == 0:
-            logger.info('epoch [{}/{}], loss:{:.4f}'.format(epoch + 1, epochs, np.mean(loss_list)))
+            logger.info(
+                'epoch [{}/{}], total_loss: {:.4f}, construction_loss: {:.4f}, vq_loss: {:.4f}'.format(
+                    epoch + 1,
+                    epochs,
+                    np.mean(total_loss_list),
+                    np.mean(construction_loss_list),
+                    np.mean(vq_loss_list)
+                )
+            )
 
         # save model
         if (epoch + 1) % args.save_freq == 0:
             ckp_path = os.path.join(save_path, 'epoch_' + str(epoch + 1) + '.pth')
-            torch.save({'trainable_linearlayer': trainable_layer.state_dict()}, ckp_path)
+            torch.save({
+                'epoch': epoch + 1,
+                'trainable_linearlayer': trainable_layer.state_dict(),
+                'hybrid_codebook': hybrid_codebook.state_dict(),
+                'optimizer': optimizer.state_dict(),
+            }, ckp_path)
+            logger.info('Saved checkpoint to {}'.format(ckp_path))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser("MultiADS", add_help=True)
@@ -267,7 +296,7 @@ if __name__ == '__main__':
     parser.add_argument("--model", type=str, default="ViT-L-14-336", help="model used")
     parser.add_argument("--pretrained", type=str, default="openai", help="pretrained weight used")
     parser.add_argument("--features_list", type=int, nargs="+", default=[6, 12, 18, 24], help="features used")
-    parser.add_argument("--codebook_num_learnable", type=int, help="The number of trainable codes in the codebook")
+    parser.add_argument("--codebook_num_learnable", type=int, default=64, help="The number of trainable codes in the codebook")
     # hyper-parameter
     parser.add_argument("--epoch", type=int, default=10, help="epochs")
     parser.add_argument("--learning_rate", type=float, default=0.001, help="learning rate")

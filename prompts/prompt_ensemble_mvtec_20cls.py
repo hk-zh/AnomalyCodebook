@@ -196,37 +196,6 @@ def encode_text_with_prompt_ensemble(model, objs, tokenizer, device):
     text_prompts = {}
     for obj in objs:
         text_features = []
-        # if obj == 'bottle':
-        #     prompt_state = [good, broken_large, broken_small, contamination]
-        # elif obj == 'cable':
-        #     prompt_state = [good, bent_wire, cable_swap, combined, cut_inner_insulation, cut_outer_insulation, missing_cable, missing_wire, poke_insulation]
-        # elif obj == 'capsule':
-        #     prompt_state = [good, crack, faulty_imprint, poke, scratch, squeeze]
-        # elif obj == 'carpet':
-        #     prompt_state = [good, color, cut, hole, metal_contamination, thread]
-        # elif obj == 'grid':
-        #     prompt_state = [good, bent, broken, glue, metal_contamination, thread]
-        # elif obj == 'hazelnut':
-        #     prompt_state = [good, crack, cut, hole, print_]
-        # elif obj == 'leather':
-        #     prompt_state = [good, color, cut, fold, glue, poke]
-        # elif obj == 'metal_nut':
-        #     prompt_state = [good, bent, color, flip, scratch]
-        # elif obj == 'pill':
-        #     prompt_state = [good, color, combined, crack, faulty_imprint, pill_type, scratch]
-        # elif obj == 'screw':
-        #     prompt_state = [good, manipulated_front, scratch_head, scratch_neck, thread_side, thread_top]
-        # elif obj == 'tile':
-        #     prompt_state = [good, crack, glue_strip, gray_stroke, oil, rough]
-        # elif obj == 'toothbrush':
-        #     prompt_state = [good, defective]
-        # elif obj == 'transistor':
-        #     prompt_state = [good, bent_lead, cut_lead, damaged_case, misplaced]
-        # elif obj == 'wood':
-        #     prompt_state = [good, color, combined, hole, liquid, scratch]
-        # elif obj == 'zipper':
-        #     prompt_state = [good, broken_teeth, combined, fabric_border, fabric_interior, rough, split_teeth, squeeze_teeth]
-        
 
         for i in range(len(prompt_state_all)):
             prompted_state = [state.format(obj) for state in prompt_state_all[i]]
