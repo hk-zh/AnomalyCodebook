@@ -8,25 +8,6 @@ import torch
 import numpy as np
 
 def encode_text_with_prompt_ensemble(model, objs, tokenizer, device):
-    # normal = ['{}', 'flawless {}', 'perfect {}', 'unblemished {}', '{} without flaw', '{} without defect', '{} without damage']
-    # damage = ['{} has a damaged defect', 'flawed {} with damage']
-    # scratch = ['{} has a scratch defect', 'flawed  {} with a scratch']
-    # breakage = ['{} with a breakage defect', 'broken {}', '{} with broken defect']
-    # burnt = ['{} with a burnt defect']
-    # weird_wick = ['{} with a weird wick defect']
-    # stuck = ['{} with a stuck defect', '{} stuck together']
-    # crack = ['{} with a crack defect']
-    # wrong_place = ['{} with defect that something on wrong place', '{} has a misplaced defect', 'flawed {} with misplacing']
-    # partical = ['{} with particals defect']
-    # bubble = ['{} with bubbles defect']
-    # melded = ['{} with melded defect']
-    # hole = ['{} has a hole defect', 'a hole on {}']
-    # melt = ['{} with melt defect']
-    # bent = ['{} has a bent defect', 'flawed {} with a bent']
-    # spot = ['{} with spot defect']
-    # extra = ['{} with extra thing', '{} has a defect with extra thing']
-    # chip = ['{} with chip defect', '{} with fragment broken defect'] 
-    # missing = ['{} with a missing defect', 'flawed {} with something missing']
 
     normal = [
         '{}', 'flawless {}', 'perfect {}', 'unblemished {}', '{} without flaw', 

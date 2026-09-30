@@ -208,5 +208,11 @@ __marimo__/
 
 
 # Project Specific
-data/
-exps/
+data
+exps
+bsub_log
+papers
+# Third-party baselines
+baselines
+*.bsub
+results

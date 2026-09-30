@@ -1,0 +1,1537 @@
+{
+ "prompt_template": [
+  "a photo of a {}.",
+  "a photo of the {}.",
+  "a close-up photo of a {}.",
+  "a cropped photo of a {}.",
+  "a blurry photo of a {}.",
+  "a low resolution photo of a {}.",
+  "a bright photo of a {}.",
+  "a dark photo of a {}.",
+  "a jpeg corrupted photo of a {}.",
+  "a black and white photo of a {}.",
+  "there is a {} in the scene.",
+  "this is a {} in the scene."
+ ],
+ "mvtec_ad": {
+  "defect_prompts": {
+   "good": [
+    "{}",
+    "flawless {}",
+    "perfect {}",
+    "unblemished {}",
+    "{} without flaw",
+    "{} without defect",
+    "{} without damage",
+    "{} in ideal condition",
+    "{} with immaculate quality",
+    "{} without any imperfections"
+   ],
+   "bent": [
+    "{} has a bent defect",
+    "flawed {} with a bent",
+    "a bend found in {}",
+    "{} with noticeable bending",
+    "a bent edge on {}",
+    "{} has a slight curve defect"
+   ],
+   "broken": [
+    "{} has a broken defect",
+    "flawed {} with breakage",
+    "visible breakage on {}",
+    "{} with broken areas",
+    "{} shows signs of breaking",
+    "cracked or broken spots on {}"
+   ],
+   "color": [
+    "{} has a color defect",
+    "inconsistent color on {}",
+    "{} with color discrepancies",
+    "{} has a noticeable color difference",
+    "{} with irregular coloring",
+    "{} has off-color patches"
+   ],
+   "combined": [
+    "{} has a combined defect",
+    "multiple issues with {}",
+    "{} with mixed defects",
+    "{} showing multiple imperfections",
+    "several flaws found on {}",
+    "{} with combined defect types"
+   ],
+   "contamination": [
+    "{} has a contamination defect",
+    "foreign particles on {}",
+    "{} is contaminated",
+    "{} contains contaminants",
+    "{} has impurity issues",
+    "traces of contamination on {}"
+   ],
+   "crack": [
+    "{} has a crack defect",
+    "a crack is present on {}",
+    "cracked area on {}",
+    "{} with noticeable cracking",
+    "fine cracks found on {}",
+    "{} shows surface cracks"
+   ],
+   "cut": [
+    "{} has a cut defect",
+    "cut marks on {}",
+    "{} with visible cuts",
+    "a cut detected on {}",
+    "{} is sliced or cut",
+    "surface cut seen on {}"
+   ],
+   "fabric": [
+    "{} has a fabric defect",
+    "{} has a fabric border defect",
+    "{} has a fabric interior defect",
+    "fabric quality issues on {}",
+    "{} with textile irregularities",
+    "fabric borders on {} show defects"
+   ],
+   "faulty_imprint": [
+    "{} has a faulty imprint defect",
+    "{} has a print defect",
+    "incorrect printing on {}",
+    "misaligned print on {}",
+    "printing errors present on {}",
+    "{} has a blurred print defect"
+   ],
+   "glue": [
+    "{} has a glue defect",
+    "{} has a glue strip defect",
+    "excess glue on {}",
+    "{} with uneven glue application",
+    "{} has visible glue spots",
+    "misplaced glue seen on {}"
+   ],
+   "hole": [
+    "{} has a hole defect",
+    "a hole on {}",
+    "visible hole on {}",
+    "{} with punctures",
+    "small hole found in {}",
+    "perforations present on {}"
+   ],
+   "missing": [
+    "{} has a missing defect",
+    "flawed {} with something missing",
+    "{} has missing components",
+    "missing parts on {}",
+    "{} shows absent pieces",
+    "certain parts missing from {}"
+   ],
+   "poke": [
+    "{} has a poke defect",
+    "{} has a poke insulation defect",
+    "visible poke mark on {}",
+    "{} has puncture marks",
+    "a poke flaw on {}",
+    "small poke defect on {}"
+   ],
+   "rough": [
+    "{} has a rough defect",
+    "rough texture on {}",
+    "uneven surface on {}",
+    "{} is coarser than expected",
+    "surface roughness seen on {}",
+    "texture defects on {}"
+   ],
+   "scratch": [
+    "{} has a scratch defect",
+    "flawed {} with a scratch",
+    "visible scratches on {}",
+    "{} with surface scratches",
+    "minor scratches seen on {}",
+    "{} shows scratch marks"
+   ],
+   "squeeze": [
+    "{} has a squeeze defect",
+    "flawed {} with a squeeze",
+    "squeezed area on {}",
+    "{} has compression marks",
+    "{} appears squeezed",
+    "flattened areas on {}"
+   ],
+   "thread": [
+    "{} has a thread defect",
+    "flawed {} with a thread",
+    "loose threads on {}",
+    "{} has visible threads",
+    "untrimmed threads on {}",
+    "threads sticking out on {}"
+   ],
+   "liquid": [
+    "{} has a liquid defect",
+    "flawed {} with liquid",
+    "{} with oil",
+    "liquid marks on {}",
+    "{} with liquid residue",
+    "stains from liquid on {}"
+   ],
+   "misplaced": [
+    "{} has a misplaced defect",
+    "flawed {} with misplacing",
+    "{} shows misalignment",
+    "misplaced parts on {}",
+    "{} with incorrect positioning",
+    "positioning defects on {}"
+   ],
+   "damaged": [
+    "{} has a damaged defect",
+    "flawed {} with damage",
+    "{} with visible damage",
+    "damaged areas on {}",
+    "physical damage seen on {}",
+    "noticeable wear on {}"
+   ]
+  },
+  "product2defects": {
+   "bottle": [
+    "good",
+    "broken",
+    "contamination"
+   ],
+   "cable": [
+    "good",
+    "bent",
+    "misplaced",
+    "combined",
+    "cut",
+    "missing",
+    "poke"
+   ],
+   "capsule": [
+    "good",
+    "crack",
+    "faulty_imprint",
+    "poke",
+    "scratch",
+    "squeeze"
+   ],
+   "carpet": [
+    "good",
+    "color",
+    "cut",
+    "hole",
+    "contamination",
+    "thread"
+   ],
+   "grid": [
+    "good",
+    "bent",
+    "broken",
+    "glue",
+    "contamination",
+    "thread"
+   ],
+   "hazelnut": [
+    "good",
+    "crack",
+    "cut",
+    "hole",
+    "faulty_imprint"
+   ],
+   "leather": [
+    "good",
+    "color",
+    "cut",
+    "misplaced",
+    "glue",
+    "poke"
+   ],
+   "metal_nut": [
+    "good",
+    "bent",
+    "color",
+    "misplaced",
+    "scratch"
+   ],
+   "pill": [
+    "good",
+    "color",
+    "combined",
+    "contamination",
+    "crack",
+    "faulty_imprint",
+    "damaged",
+    "scratch"
+   ],
+   "screw": [
+    "good",
+    "fabric",
+    "scratch",
+    "thread"
+   ],
+   "tile": [
+    "good",
+    "crack",
+    "glue",
+    "damaged",
+    "liquid",
+    "rough"
+   ],
+   "toothbrush": [
+    "good",
+    "damaged"
+   ],
+   "transistor": [
+    "good",
+    "bent",
+    "cut",
+    "damaged",
+    "misplaced"
+   ],
+   "wood": [
+    "good",
+    "color",
+    "combined",
+    "hole",
+    "liquid",
+    "scratch"
+   ],
+   "zipper": [
+    "good",
+    "broken",
+    "combined",
+    "fabric",
+    "rough",
+    "misplaced",
+    "squeeze"
+   ]
+  }
+ },
+ "visa": {
+  "defect_prompts": {
+   "normal": [
+    "{}",
+    "flawless {}",
+    "perfect {}",
+    "unblemished {}",
+    "{} without flaw",
+    "{} without defect",
+    "{} without damage",
+    "{} in pristine condition",
+    "{} with no imperfections",
+    "{} with ideal quality"
+   ],
+   "damage": [
+    "{} has a damaged defect",
+    "flawed {} with damage",
+    "{} shows signs of damage",
+    "damage found on {}",
+    "{} with visible wear and tear",
+    "{} with structural damage"
+   ],
+   "scratch": [
+    "{} has a scratch defect",
+    "flawed {} with a scratch",
+    "scratches visible on {}",
+    "{} has surface scratches",
+    "small scratches found on {}",
+    "{} with scratch marks"
+   ],
+   "breakage": [
+    "{} with a breakage defect",
+    "broken {}",
+    "{} with broken defect",
+    "{} shows breakage",
+    "broken or cracked areas on {}",
+    "visible breakage on {}"
+   ],
+   "burnt": [
+    "{} with a burnt defect",
+    "{} shows burn marks",
+    "burnt areas on {}",
+    "{} with signs of burning",
+    "scorch marks on {}",
+    "{} appears slightly burnt"
+   ],
+   "weird_wick": [
+    "{} with a weird_wick defect",
+    "{} has an unusual wick",
+    "the wick on {} appears odd",
+    "{} with a strangely shaped wick",
+    "irregular wick found on {}",
+    "odd wick defect on {}"
+   ],
+   "stuck": [
+    "{} with a stuck defect",
+    "{} stuck together",
+    "{} has stuck parts",
+    "adhesive issue causing {} to stick",
+    "{} is partially stuck",
+    "{} with adhesion defect"
+   ],
+   "crack": [
+    "{} with a crack defect",
+    "{} has a visible crack",
+    "cracked areas on {}",
+    "{} with surface cracking",
+    "fine cracks found on {}",
+    "{} shows crack lines"
+   ],
+   "wrong_place": [
+    "{} with defect that something on wrong_place",
+    "{} has a misplaced defect",
+    "flawed {} with misplacing",
+    "misaligned part on {}",
+    "{} shows parts out of place",
+    "misplacement detected on {}"
+   ],
+   "partical": [
+    "{} with particles defect",
+    "{} has foreign particles",
+    "small particles on {}",
+    "{} with unwanted particles",
+    "contaminants found on {}",
+    "{} with visible particles"
+   ],
+   "bubble": [
+    "{} with bubbles defect",
+    "bubbles seen on {}",
+    "{} with bubble marks",
+    "air bubbles in {}",
+    "{} contains bubble defects",
+    "small bubbles on {} surface"
+   ],
+   "melded": [
+    "{} with melded defect",
+    "melded parts on {}",
+    "{} has fused areas",
+    "fused spots on {}",
+    "melded areas on {}",
+    "{} with melded material"
+   ],
+   "hole": [
+    "{} has a hole defect",
+    "a hole on {}",
+    "visible hole on {}",
+    "{} has small punctures",
+    "{} shows perforations",
+    "hole present on {}"
+   ],
+   "melt": [
+    "{} with melt defect",
+    "melted areas on {}",
+    "{} shows melting",
+    "signs of melting on {}",
+    "{} with melted spots",
+    "{} has a melted appearance"
+   ],
+   "bent": [
+    "{} has a bent defect",
+    "flawed {} with a bent",
+    "bent areas on {}",
+    "{} with visible bending",
+    "{} shows curvature issues",
+    "noticeable bend in {}"
+   ],
+   "spot": [
+    "{} with spot defect",
+    "spots visible on {}",
+    "flawed {} with spots",
+    "{} with visible spotting",
+    "{} shows small spots",
+    "surface spots on {}"
+   ],
+   "extra": [
+    "{} with extra thing",
+    "{} has a defect with extra thing",
+    "extra material on {}",
+    "{} contains additional pieces",
+    "{} with extra component defect",
+    "unwanted additions on {}"
+   ],
+   "chip": [
+    "{} with chip defect",
+    "{} with fragment broken defect",
+    "chipped areas on {}",
+    "{} with chipped parts",
+    "broken fragments on {}",
+    "chip marks found on {}"
+   ],
+   "missing": [
+    "{} with a missing defect",
+    "flawed {} with something missing",
+    "{} has missing parts",
+    "missing components on {}",
+    "absent pieces in {}",
+    "{} is incomplete"
+   ],
+   "discolor": [
+    "{} has a color defect",
+    "inconsistent color on {}",
+    "{} with color discrepancies",
+    "{} has a noticeable color difference",
+    "{} with irregular coloring",
+    "{} has off-color patches"
+   ],
+   "leak": [
+    "{} has a leak defect",
+    "{} with oil",
+    "flawed {} with liquid",
+    "{} with leaking issue"
+   ]
+  },
+  "product2defects": {
+   "candle": [
+    "normal",
+    "damage",
+    "weird_wick",
+    "partical",
+    "melded",
+    "spot",
+    "extra",
+    "missing"
+   ],
+   "capsules": [
+    "normal",
+    "scratch",
+    "bubble",
+    "discolor",
+    "leak"
+   ],
+   "cashew": [
+    "normal",
+    "scratch",
+    "breakage",
+    "burnt",
+    "stuck",
+    "hole",
+    "spot"
+   ],
+   "chewinggum": [
+    "normal",
+    "scratch",
+    "spot",
+    "missing"
+   ],
+   "fryum": [
+    "normal",
+    "scratch",
+    "breakage",
+    "burnt",
+    "stuck",
+    "spot"
+   ],
+   "macaroni1": [
+    "normal",
+    "scratch",
+    "crack",
+    "spot",
+    "chip"
+   ],
+   "macaroni2": [
+    "normal",
+    "scratch",
+    "breakage",
+    "crack",
+    "spot",
+    "chip"
+   ],
+   "pcb1": [
+    "normal",
+    "scratch",
+    "melt",
+    "bent",
+    "missing"
+   ],
+   "pcb2": [
+    "normal",
+    "scratch",
+    "melt",
+    "bent",
+    "missing"
+   ],
+   "pcb3": [
+    "normal",
+    "scratch",
+    "melt",
+    "bent",
+    "missing"
+   ],
+   "pcb4": [
+    "normal",
+    "scratch",
+    "damage",
+    "extra",
+    "burnt",
+    "missing",
+    "wrong_place"
+   ],
+   "pipe_fryum": [
+    "normal",
+    "scratch",
+    "breakage",
+    "burnt",
+    "stuck",
+    "spot"
+   ]
+  }
+ },
+ "mpdd": {
+  "defect_prompts": {
+   "good": [
+    "{}",
+    "flawless {}",
+    "perfect {}",
+    "unblemished {}",
+    "{} without flaw",
+    "{} without defect",
+    "{} without damage",
+    "{} in pristine condition",
+    "{} with no imperfections",
+    "{} of ideal quality"
+   ],
+   "hole": [
+    "{} with a hole defect",
+    "{} has a hole defect",
+    "a hole on {}",
+    "visible hole in {}",
+    "visible hole on {}",
+    "{} with puncture marks",
+    "hole detected in {}",
+    "{} has small perforations",
+    "{} shows perforation defects",
+    "{} with small holes"
+   ],
+   "scratch": [
+    "{} has a scratch defect",
+    "flawed {} with a scratch",
+    "scratches visible on {}",
+    "{} with surface scratches",
+    "{} has scratch marks",
+    "minor scratches found on {}",
+    "{} shows visible scratching",
+    "scratch marks on {}",
+    "{} with linear scratch defects",
+    "{} has damaged surface scratches"
+   ],
+   "bent": [
+    "{} has a bent defect",
+    "flawed {} with a bent defect",
+    "bent areas on {}",
+    "{} with visible bending",
+    "{} shows curvature issues",
+    "noticeable bend in {}",
+    "{} is bent out of shape",
+    "{} with deformation caused by bending",
+    "bending defect on {}",
+    "{} appears warped or bent"
+   ],
+   "mismatch": [
+    "{} with parts mismatch defect",
+    "{} has mismatched parts",
+    "mismatched components on {}",
+    "{} shows part misplacement",
+    "{} with incorrect assembly",
+    "parts are misaligned on {}",
+    "{} has assembly mismatch",
+    "{} with component mismatch",
+    "{} shows inconsistent part placement",
+    "wrong or mismatched part on {}"
+   ],
+   "defective_painting": [
+    "{} with a defective painting defect",
+    "flawed {} with painting imperfections",
+    "{} has painting inconsistencies",
+    "uneven painting on {}",
+    "{} shows poor paint quality",
+    "paint defects present on {}",
+    "{} with missing or uneven paint",
+    "{} has surface paint defects",
+    "{} with abnormal coating",
+    "defective coating visible on {}"
+   ],
+   "rust": [
+    "{} with a rust defect",
+    "{} has rust patches",
+    "rust spots on {}",
+    "visible rust on {}",
+    "{} shows signs of rusting",
+    "{} affected by corrosion",
+    "{} with corroded areas",
+    "corrosion marks on {}",
+    "{} has rusty surface defects",
+    "oxidation visible on {}"
+   ],
+   "flattening": [
+    "{} becomes flattened",
+    "{} has a flattening defect",
+    "{} has a flatten defect",
+    "flattening observed on {}",
+    "{} appears compressed",
+    "{} is flattened or squashed",
+    "deformation detected on {}",
+    "{} with compressed shape",
+    "{} shows flattened regions",
+    "{} has shape deformation from flattening"
+   ]
+  },
+  "product2defects": {
+   "bracket_black": [
+    "good",
+    "hole",
+    "scratch"
+   ],
+   "bracket_brown": [
+    "good",
+    "mismatch",
+    "bent"
+   ],
+   "bracket_white": [
+    "good",
+    "defective_painting",
+    "scratch"
+   ],
+   "connector": [
+    "good",
+    "mismatch"
+   ],
+   "metal_plate": [
+    "good",
+    "rust",
+    "scratch"
+   ],
+   "tubes": [
+    "good",
+    "flattening"
+   ]
+  }
+ },
+ "real_iad": {
+  "defect_prompts": {
+   "good": [
+    "{}",
+    "flawless {}",
+    "perfect {}",
+    "unblemished {}",
+    "{} without flaw",
+    "{} without defect",
+    "{} without damage",
+    "{} in pristine condition",
+    "{} with no imperfections",
+    "{} of ideal quality"
+   ],
+   "pit": [
+    "{} with a pit defect",
+    "{} has a pit mark",
+    "small pit on {}",
+    "visible pit in {}",
+    "{} shows pitting damage",
+    "pinhole pit on {}",
+    "{} with surface pitting",
+    "a pit is visible on {}"
+   ],
+   "deformation": [
+    "{} with a deformation defect",
+    "{} appears deformed",
+    "visible deformation on {}",
+    "{} has a warped shape",
+    "structural deformation in {}",
+    "{} is bent out of shape",
+    "{} shows shape distortion",
+    "deformed area on {}"
+   ],
+   "abrasion": [
+    "{} with an abrasion defect",
+    "visible abrasion on {}",
+    "{} has an abraded surface",
+    "surface abrasion in {}",
+    "{} shows wear marks",
+    "abraded patch on {}",
+    "{} with a rubbed-off surface",
+    "{} has friction damage"
+   ],
+   "scratch": [
+    "{} with a scratch defect",
+    "visible scratch on {}",
+    "{} has a scratch mark",
+    "scratch line across {}",
+    "{} shows scratching damage",
+    "a scratch is visible on {}",
+    "{} with surface scratches",
+    "scratched area on {}"
+   ],
+   "damage": [
+    "{} with a damage defect",
+    "visible damage on {}",
+    "{} is damaged",
+    "damaged area on {}",
+    "{} shows physical damage",
+    "{} has a broken section",
+    "damage marks on {}",
+    "{} with structural damage"
+   ],
+   "missing": [
+    "{} with a missing part defect",
+    "{} is missing a component",
+    "missing part on {}",
+    "{} has a missing piece",
+    "part absent from {}",
+    "{} shows a missing section",
+    "incomplete {} with a missing part",
+    "{} lacks a required component"
+   ],
+   "foreign": [
+    "{} with a foreign material defect",
+    "foreign object on {}",
+    "{} has foreign material attached",
+    "visible foreign substance on {}",
+    "{} contaminated with a foreign object",
+    "foreign particle stuck to {}",
+    "{} with an embedded foreign body",
+    "unexpected foreign material in {}"
+   ],
+   "contamination": [
+    "{} with a contamination defect",
+    "visible contamination on {}",
+    "{} has surface contamination",
+    "contaminant residue on {}",
+    "{} shows contamination stains",
+    "foreign residue on {}",
+    "{} with dirt contamination",
+    "contaminated surface of {}"
+   ]
+  },
+  "product2defects": {
+   "switch": [
+    "contamination",
+    "good",
+    "missing",
+    "scratch"
+   ],
+   "eraser": [
+    "contamination",
+    "good",
+    "missing",
+    "pit",
+    "scratch"
+   ],
+   "woodstick": [
+    "contamination",
+    "good",
+    "missing",
+    "pit",
+    "scratch"
+   ],
+   "zipper": [
+    "contamination",
+    "damage",
+    "deformation",
+    "good",
+    "missing"
+   ],
+   "fire_hood": [
+    "contamination",
+    "good",
+    "missing",
+    "pit",
+    "scratch"
+   ],
+   "pcb": [
+    "contamination",
+    "foreign",
+    "good",
+    "missing",
+    "scratch"
+   ],
+   "toothbrush": [
+    "abrasion",
+    "contamination",
+    "good",
+    "missing"
+   ],
+   "plastic_nut": [
+    "contamination",
+    "good",
+    "missing",
+    "pit",
+    "scratch"
+   ],
+   "wooden_beads": [
+    "contamination",
+    "good",
+    "missing",
+    "pit",
+    "scratch"
+   ],
+   "transistor1": [
+    "contamination",
+    "deformation",
+    "good",
+    "missing"
+   ],
+   "bottle_cap": [
+    "contamination",
+    "good",
+    "missing",
+    "pit",
+    "scratch"
+   ],
+   "u_block": [
+    "abrasion",
+    "contamination",
+    "good",
+    "missing",
+    "scratch"
+   ],
+   "sim_card_set": [
+    "abrasion",
+    "contamination",
+    "good",
+    "scratch"
+   ],
+   "end_cap": [
+    "contamination",
+    "damage",
+    "good",
+    "missing",
+    "scratch"
+   ],
+   "usb": [
+    "contamination",
+    "deformation",
+    "good",
+    "missing",
+    "scratch"
+   ],
+   "regulator": [
+    "good",
+    "missing",
+    "scratch"
+   ],
+   "plastic_plug": [
+    "contamination",
+    "good",
+    "missing",
+    "pit",
+    "scratch"
+   ],
+   "audiojack": [
+    "contamination",
+    "deformation",
+    "good",
+    "missing",
+    "scratch"
+   ],
+   "mint": [
+    "contamination",
+    "foreign",
+    "good",
+    "missing"
+   ],
+   "toy_brick": [
+    "contamination",
+    "good",
+    "missing",
+    "pit",
+    "scratch"
+   ],
+   "toy": [
+    "contamination",
+    "good",
+    "missing",
+    "pit",
+    "scratch"
+   ],
+   "rolled_strip_base": [
+    "contamination",
+    "good",
+    "missing",
+    "pit"
+   ],
+   "terminalblock": [
+    "contamination",
+    "good",
+    "missing",
+    "pit"
+   ],
+   "mounts": [
+    "contamination",
+    "good",
+    "missing",
+    "pit"
+   ],
+   "button_battery": [
+    "abrasion",
+    "contamination",
+    "good",
+    "pit",
+    "scratch"
+   ],
+   "porcelain_doll": [
+    "abrasion",
+    "contamination",
+    "good",
+    "scratch"
+   ],
+   "phone_battery": [
+    "contamination",
+    "damage",
+    "good",
+    "pit",
+    "scratch"
+   ],
+   "usb_adaptor": [
+    "abrasion",
+    "contamination",
+    "good",
+    "pit",
+    "scratch"
+   ],
+   "vcpill": [
+    "contamination",
+    "good",
+    "missing",
+    "pit",
+    "scratch"
+   ],
+   "tape": [
+    "contamination",
+    "damage",
+    "good",
+    "missing"
+   ]
+  }
+ },
+ "mad_sim": {
+  "defect_prompts": {
+   "good": [
+    "{}",
+    "flawless {}",
+    "perfect {}",
+    "unblemished {}",
+    "{} without flaw",
+    "{} without defect",
+    "{} without damage",
+    "{} in pristine condition",
+    "{} with no imperfections",
+    "{} of ideal quality"
+   ],
+   "Stains": [
+    "{} with a stain defect",
+    "visible stain on {}",
+    "{} has a stained surface",
+    "stain mark on {}",
+    "{} shows discoloration stains",
+    "a stain is visible on {}",
+    "{} with surface staining",
+    "stained patch on {}"
+   ],
+   "Burrs": [
+    "{} with a burr defect",
+    "visible burr on {}",
+    "{} has burred edges",
+    "burr mark on {}",
+    "{} shows raised burrs",
+    "a burr is visible on {}",
+    "{} with a rough burred surface",
+    "burred edge on {}"
+   ],
+   "Missing": [
+    "{} with a missing part defect",
+    "{} is missing a component",
+    "missing part on {}",
+    "{} has a missing piece",
+    "part absent from {}",
+    "{} shows a missing section",
+    "incomplete {} with a missing part",
+    "{} lacks a required component"
+   ]
+  },
+  "product2defects": {
+   "Unicorn": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Scorpion": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Whale": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Zalika": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Gorilla": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Swan": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Obesobeso": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Bird": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Turtle": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Owl": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Cat": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Sabertooth": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Sheep": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Pheonix": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Elephant": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Bear": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Puppy": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Pig": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Parrot": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ],
+   "Mallard": [
+    "Burrs",
+    "Missing",
+    "Stains",
+    "good"
+   ]
+  }
+ },
+ "mad_real": {
+  "defect_prompts": {
+   "good": [
+    "{}",
+    "flawless {}",
+    "perfect {}",
+    "unblemished {}",
+    "{} without flaw",
+    "{} without defect",
+    "{} without damage",
+    "{} in pristine condition",
+    "{} with no imperfections",
+    "{} of ideal quality"
+   ],
+   "Stains": [
+    "{} with a stain defect",
+    "visible stain on {}",
+    "{} has a stained surface",
+    "stain mark on {}",
+    "{} shows discoloration stains",
+    "a stain is visible on {}",
+    "{} with surface staining",
+    "stained patch on {}"
+   ],
+   "Burrs": [
+    "{} with a burr defect",
+    "visible burr on {}",
+    "{} has burred edges",
+    "burr mark on {}",
+    "{} shows raised burrs",
+    "a burr is visible on {}",
+    "{} with a rough burred surface",
+    "burred edge on {}"
+   ],
+   "Missing": [
+    "{} with a missing part defect",
+    "{} is missing a component",
+    "missing part on {}",
+    "{} has a missing piece",
+    "part absent from {}",
+    "{} shows a missing section",
+    "incomplete {} with a missing part",
+    "{} lacks a required component"
+   ]
+  },
+  "product2defects": {
+   "Parrot": [
+    "Missing",
+    "good"
+   ],
+   "Puppy": [
+    "Stains",
+    "good"
+   ],
+   "Pig": [
+    "Missing",
+    "good"
+   ],
+   "Whale": [
+    "Stains",
+    "good"
+   ],
+   "Bird": [
+    "Missing",
+    "good"
+   ],
+   "Bear": [
+    "Stains",
+    "good"
+   ],
+   "Scorpion": [
+    "Missing",
+    "good"
+   ],
+   "Turtle": [
+    "Stains",
+    "good"
+   ],
+   "Unicorn": [
+    "Missing",
+    "good"
+   ],
+   "Elephant": [
+    "Missing",
+    "good"
+   ]
+  }
+ },
+ "bmad": {
+  "defect_prompts": {
+   "good": [
+    "normal {}",
+    "healthy {}",
+    "{} with no lesion",
+    "{} without abnormality",
+    "{} in normal condition",
+    "{} showing no disease",
+    "unremarkable {}",
+    "{}"
+   ],
+   "lesion": [
+    "{} with a lesion",
+    "{} with an abnormality",
+    "abnormal {}",
+    "{} with a tumor",
+    "{} showing a pathological region",
+    "diseased {}",
+    "{} with a lesion region",
+    "{} with an anomalous region"
+   ]
+  },
+  "product2defects": {
+   "brain": [
+    "good",
+    "lesion"
+   ],
+   "liver": [
+    "good",
+    "lesion"
+   ],
+   "resc": [
+    "good",
+    "lesion"
+   ],
+   "oct2017": [
+    "good",
+    "lesion"
+   ],
+   "chest": [
+    "good",
+    "lesion"
+   ],
+   "his": [
+    "good",
+    "lesion"
+   ]
+  }
+ },
+ "loco": {
+  "defect_prompts": {
+   "good": [
+    "{}",
+    "flawless {}",
+    "perfect {}",
+    "{} without defect",
+    "{} without damage",
+    "{} correctly assembled",
+    "{} in ideal condition"
+   ],
+   "missing": [
+    "{} with a missing component",
+    "flawed {} with a missing component",
+    "{} showing a missing component"
+   ],
+   "additional": [
+    "{} with a duplicated or extra component",
+    "flawed {} with a duplicated or extra component",
+    "{} showing a duplicated or extra component"
+   ],
+   "misplaced": [
+    "{} with a misplaced component",
+    "flawed {} with a misplaced component",
+    "{} showing a misplaced component"
+   ],
+   "swapped": [
+    "{} with a wrong or substituted component",
+    "flawed {} with a wrong or substituted component",
+    "{} showing a wrong or substituted component"
+   ],
+   "broken": [
+    "{} with a broken part",
+    "flawed {} with a broken part",
+    "{} showing a broken part"
+   ],
+   "crack": [
+    "{} with a crack",
+    "flawed {} with a crack",
+    "{} showing a crack"
+   ],
+   "scratch": [
+    "{} with a scratch",
+    "flawed {} with a scratch",
+    "{} showing a scratch"
+   ],
+   "contamination": [
+    "{} with a contamination",
+    "flawed {} with a contamination",
+    "{} showing a contamination"
+   ],
+   "deformed": [
+    "{} with a deformation",
+    "flawed {} with a deformation",
+    "{} showing a deformation"
+   ]
+  },
+  "product2defects": {
+   "breakfast_box": [
+    "good",
+    "missing",
+    "additional",
+    "misplaced",
+    "swapped",
+    "broken",
+    "crack",
+    "scratch",
+    "contamination",
+    "deformed"
+   ],
+   "juice_bottle": [
+    "good",
+    "missing",
+    "additional",
+    "misplaced",
+    "swapped",
+    "broken",
+    "crack",
+    "scratch",
+    "contamination",
+    "deformed"
+   ],
+   "pushpins": [
+    "good",
+    "missing",
+    "additional",
+    "misplaced",
+    "swapped",
+    "broken",
+    "crack",
+    "scratch",
+    "contamination",
+    "deformed"
+   ],
+   "screw_bag": [
+    "good",
+    "missing",
+    "additional",
+    "misplaced",
+    "swapped",
+    "broken",
+    "crack",
+    "scratch",
+    "contamination",
+    "deformed"
+   ],
+   "splicing_connectors": [
+    "good",
+    "missing",
+    "additional",
+    "misplaced",
+    "swapped",
+    "broken",
+    "crack",
+    "scratch",
+    "contamination",
+    "deformed"
+   ]
+  }
+ },
+ "goodsad": {
+  "defect_prompts": {
+   "good": [
+    "{}",
+    "flawless {}",
+    "perfect {}",
+    "{} without defect",
+    "{} without damage",
+    "{} correctly assembled",
+    "{} in ideal condition"
+   ],
+   "opened": [
+    "{} with a torn or opened seal",
+    "flawed {} with a torn or opened seal",
+    "{} showing a torn or opened seal"
+   ],
+   "cap open": [
+    "{} with a open or unscrewed cap",
+    "flawed {} with a open or unscrewed cap",
+    "{} showing a open or unscrewed cap"
+   ],
+   "broken": [
+    "{} with a broken part",
+    "flawed {} with a broken part",
+    "{} showing a broken part"
+   ],
+   "deformed": [
+    "{} with a dent or deformation",
+    "flawed {} with a dent or deformation",
+    "{} showing a dent or deformation"
+   ],
+   "missing": [
+    "{} with a missing component",
+    "flawed {} with a missing component",
+    "{} showing a missing component"
+   ],
+   "surface damage": [
+    "{} with a damaged surface",
+    "flawed {} with a damaged surface",
+    "{} showing a damaged surface"
+   ],
+   "surface anomaly": [
+    "{} with a surface anomaly",
+    "flawed {} with a surface anomaly",
+    "{} showing a surface anomaly"
+   ]
+  },
+  "product2defects": {
+   "cigarette_box": [
+    "good",
+    "opened",
+    "cap open",
+    "broken",
+    "deformed",
+    "missing",
+    "surface damage",
+    "surface anomaly"
+   ],
+   "drink_bottle": [
+    "good",
+    "opened",
+    "cap open",
+    "broken",
+    "deformed",
+    "missing",
+    "surface damage",
+    "surface anomaly"
+   ],
+   "drink_can": [
+    "good",
+    "opened",
+    "cap open",
+    "broken",
+    "deformed",
+    "missing",
+    "surface damage",
+    "surface anomaly"
+   ],
+   "food_bottle": [
+    "good",
+    "opened",
+    "cap open",
+    "broken",
+    "deformed",
+    "missing",
+    "surface damage",
+    "surface anomaly"
+   ],
+   "food_box": [
+    "good",
+    "opened",
+    "cap open",
+    "broken",
+    "deformed",
+    "missing",
+    "surface damage",
+    "surface anomaly"
+   ],
+   "food_package": [
+    "good",
+    "opened",
+    "cap open",
+    "broken",
+    "deformed",
+    "missing",
+    "surface damage",
+    "surface anomaly"
+   ]
+  }
+ }
+}
