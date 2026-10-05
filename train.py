@@ -284,11 +284,24 @@ def train(args):
 		args.model
 	).to(device)
 
-	hybrid_codebook = HybridCodebook(
-		num_learnable=args.codebook_num_learnable,
-		embed_dim=model_configs["embed_dim"],
-		beta=args.beta
-	).to(device)
+	n_layers = len(args.features_list)
+	if args.per_layer_codebook:
+		# one codebook per feature layer, each reseeded and revived from its own layer
+		hybrid_codebook = torch.nn.ModuleList([
+			HybridCodebook(
+				num_learnable=args.codebook_num_learnable,
+				embed_dim=model_configs["embed_dim"],
+				beta=args.beta
+			) for _ in range(n_layers)
+		]).to(device)
+		codebooks = list(hybrid_codebook)
+	else:
+		hybrid_codebook = HybridCodebook(
+			num_learnable=args.codebook_num_learnable,
+			embed_dim=model_configs["embed_dim"],
+			beta=args.beta
+		).to(device)
+		codebooks = [hybrid_codebook] * n_layers
 
 	# In the stab* checkpoints the global token collapses onto one prototype
 	# that no patch ever selects (tools/prototype_usage.py), so the branch only
@@ -343,6 +356,21 @@ def train(args):
 
 	global_step = 0
 	warmup_feats = []
+	warmup_feats_layer = [[] for _ in range(n_layers)]
+
+	def save_checkpoint(path, epoch_no):
+		ckpt = {
+			"epoch": epoch_no,
+			"global_step": global_step,
+			"trainable_linearlayer": trainable_layer.state_dict(),
+			"hybrid_codebook": hybrid_codebook.state_dict(),
+			"per_layer_codebook": bool(args.per_layer_codebook),
+			"optimizer": optimizer.state_dict(),
+		}
+		if image_adaptor is not None:
+			ckpt["image_adaptor"] = image_adaptor.state_dict()
+		torch.save(ckpt, path)
+		logger.info("Saved checkpoint to {}".format(path))
 
 	for epoch in range(epochs):
 		trainable_layer.train()
@@ -389,7 +417,7 @@ def train(args):
 						text_features=text_features,
 						anomaly_labels=anomaly_label,
 						image_adaptor=image_adaptor,
-						hybrid_codebook=hybrid_codebook,
+						hybrid_codebook=codebooks[-1],
 						temperature=args.image_temperature
 					)
 				else:
@@ -408,12 +436,26 @@ def train(args):
 				# periodically revive entries that have gone unused.
 				if args.codebook_init == "warmup_kmeans" and global_step <= args.codebook_warmup_steps:
 					with torch.no_grad():
-						for lt in patch_tokens_list:
+						for l, lt in enumerate(patch_tokens_list):
 							f = lt.detach().reshape(-1, lt.shape[-1]).float()
 							take = min(args.warmup_feats_per_step, f.shape[0])
 							sel = torch.randperm(f.shape[0], device=f.device)[:take]
-							warmup_feats.append(f[sel].cpu())
-					if global_step == args.codebook_warmup_steps and len(warmup_feats) > 0:
+							if args.per_layer_codebook:
+								warmup_feats_layer[l].append(f[sel].cpu())
+							else:
+								warmup_feats.append(f[sel].cpu())
+					if global_step == args.codebook_warmup_steps and args.per_layer_codebook:
+						for l, cb in enumerate(codebooks):
+							feats = torch.cat(warmup_feats_layer[l], dim=0).to(device)
+							n_init = cb.init_from_features(feats)
+							logger.info(
+								"layer %d: reseeded %d prototypes by spherical k-means on %d warm-up features",
+								l, n_init, feats.shape[0]
+							)
+							warmup_feats_layer[l].clear()
+							del feats
+						torch.cuda.empty_cache()
+					elif global_step == args.codebook_warmup_steps and len(warmup_feats) > 0:
 						feats = torch.cat(warmup_feats, dim=0).to(device)
 						n_init = hybrid_codebook.init_from_features(feats)
 						logger.info(
@@ -435,15 +477,21 @@ def train(args):
 				)
 				if args.revive_every > 0 and global_step % args.revive_every == 0 and revive_ok:
 					with torch.no_grad():
-						f = patch_tokens_list[-1].detach().reshape(-1, patch_tokens_list[-1].shape[-1])
-						n_rev = hybrid_codebook.revive_dead(f)
+						if args.per_layer_codebook:
+							n_rev = sum(
+								cb.revive_dead(lt.detach().reshape(-1, lt.shape[-1]))
+								for cb, lt in zip(codebooks, patch_tokens_list)
+							)
+						else:
+							f = patch_tokens_list[-1].detach().reshape(-1, patch_tokens_list[-1].shape[-1])
+							n_rev = hybrid_codebook.revive_dead(f)
 					if n_rev > 0:
 						logger.info("step %d: revived %d dead prototypes", global_step, n_rev)
 
 				for layer_idx in range(len(patch_tokens_list)):
 					layer_tokens = patch_tokens_list[layer_idx]
 
-					ret = hybrid_codebook(layer_tokens)
+					ret = codebooks[layer_idx](layer_tokens)
 
 					patch_tokens_q = ret["z_q_st"]
 					patch_quant_loss = patch_quant_loss + ret["quant_loss"]
@@ -526,6 +574,9 @@ def train(args):
 
 			optimizer.step()
 
+			if args.save_every_steps > 0 and global_step % args.save_every_steps == 0:
+				save_checkpoint(os.path.join(args.save_path, f"step_{global_step}.pth"), epoch + 1)
+
 			total_loss_list.append(loss.item())
 			construction_loss_list.append(construction_loss.item())
 			image_loss_list.append(image_loss.item())
@@ -560,21 +611,12 @@ def train(args):
 			logger.info("epoch %d: map_image_loss: %.4f", epoch + 1, np.mean(map_image_loss_list))
 			logger.info(
 				"epoch %d: %d/%d prototypes live",
-				epoch + 1, hybrid_codebook.live_codes(), hybrid_codebook.num_learnable
+				epoch + 1, sum(cb.live_codes() for cb in set(codebooks)),
+				sum(cb.num_learnable for cb in set(codebooks))
 			)
 
 		if (epoch + 1) % args.save_freq == 0:
-			ckp_path = os.path.join(args.save_path, "epoch_" + str(epoch + 1) + ".pth")
-			ckpt = {
-				"epoch": epoch + 1,
-				"trainable_linearlayer": trainable_layer.state_dict(),
-				"hybrid_codebook": hybrid_codebook.state_dict(),
-				"optimizer": optimizer.state_dict(),
-			}
-			if image_adaptor is not None:
-				ckpt["image_adaptor"] = image_adaptor.state_dict()
-			torch.save(ckpt, ckp_path)
-			logger.info("Saved checkpoint to {}".format(ckp_path))
+			save_checkpoint(os.path.join(args.save_path, "epoch_" + str(epoch + 1) + ".pth"), epoch + 1)
 
 
 if __name__ == "__main__":
@@ -611,6 +653,7 @@ if __name__ == "__main__":
 	parser.add_argument("--aug_rate", type=float, default=0.2, help="augmentation rate")
 	parser.add_argument("--print_freq", type=int, default=1, help="print frequency")
 	parser.add_argument("--save_freq", type=int, default=1, help="save frequency")
+	parser.add_argument("--save_every_steps", type=int, default=0, help="also save step_<N>.pth every N optimizer steps; 0 disables")
 	parser.add_argument("--seed", type=int, default=42, help="random seed")
 	parser.add_argument("--num_workers", type=int, default=4, help="dataloader workers")
 	parser.add_argument("--grad_clip", type=float, default=1.0, help="gradient clipping max norm, <=0 disables clipping")
@@ -623,6 +666,7 @@ if __name__ == "__main__":
 	parser.add_argument("--legacy_revive_at_init", action="store_true", help="reproduce the stab* checkpoints: allow a revive check on the k-means reseed step, which then replaces every center (usage was just zeroed) with one batch of worst-covered layer-24 tokens")
 	parser.add_argument("--beta", type=float, default=0.1, help="commitment loss weight inside codebook")
 	parser.add_argument("--vq_weight", type=float, default=0.25, help="weight for patch-level quantization loss")
+	parser.add_argument("--per_layer_codebook", action="store_true", help="one codebook of codebook_num_learnable entries per feature layer instead of one shared by all layers")
 
 	args = parser.parse_args()
 	if args.no_image_branch and args.image_loss_weight > 0:

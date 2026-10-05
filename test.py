@@ -26,6 +26,7 @@ from sklearn.metrics import (
 )
 
 import open_clip
+from open_clip.transform import image_transform
 
 from model import LinearLayer, HybridCodebook
 from dataset import VisaDatasetTest, MVTecDataset, MPDDDataset, MADDataset, RealIADDataset_v2, BMADDataset, MVTecLOCODataset, GoodsADDataset
@@ -416,6 +417,49 @@ def entropy_adaptive_softmax(sim_logits, calib_map, min_temperature=0.01, max_te
 	return seg_prob
 
 
+def anomaly_map_from_tokens(patch_tokens, idx_tensor, text_features_g, codebooks, args):
+	"""Layer-averaged anomaly map of one product group before smoothing, computed
+	as in the main loop of test() but without its diagnostics. Used for the
+	mirrored pass of --tta_flip."""
+	acc_map = None
+	for layer_idx in range(len(patch_tokens)):
+		layer_tokens = extract_patch_tokens_for_layer(
+			patch_tokens[layer_idx].index_select(0, idx_tensor), args.model)
+		ret = codebooks[layer_idx](
+			layer_tokens,
+			assign_temperature=args.assign_temperature,
+			semantic_bias=args.semantic_bias,
+			assign_mode=args.assign_mode
+		)
+		patch_used = F.normalize(ret["z_q_st"], dim=-1)
+		if args.score_blend > 0.0:
+			raw_patch = F.normalize(layer_tokens, dim=-1)
+			patch_used = F.normalize(
+				args.score_blend * raw_patch + (1.0 - args.score_blend) * patch_used, dim=-1)
+		sim_logits = torch.bmm(patch_used, text_features_g)
+		Bg, L, C = sim_logits.shape
+		H = int(np.sqrt(L))
+		sim_logits = F.interpolate(
+			sim_logits.permute(0, 2, 1).contiguous().view(Bg, C, H, H),
+			size=(args.image_size, args.image_size),
+			mode="bilinear",
+			align_corners=True
+		)
+		if args.cali:
+			calib_map = build_calibration_map(assign_probs=ret["assign_probs"], img_size=args.image_size)
+			seg_prob = entropy_adaptive_softmax(
+				sim_logits=sim_logits,
+				calib_map=calib_map,
+				min_temperature=args.temperature,
+				max_temperature=args.max_temperature
+			)
+		else:
+			seg_prob = torch.softmax(sim_logits / args.temperature, dim=1)
+		layer_map = seg_prob[:, 1:, :, :].sum(dim=1)
+		acc_map = layer_map if acc_map is None else acc_map + layer_map
+	return acc_map / len(patch_tokens)
+
+
 def compute_global_image_score(
 	image_features,
 	text_features,
@@ -659,6 +703,16 @@ def compute_frozen_global_scores(args, text_prompts, device):
 	g_model.eval()
 
 	g_data = build_dataset(args, g_preprocess, *build_target_transforms(args.global_image_size))
+
+	# the global pass has its own fp32 text anchors (the map's are built under fp16
+	# autocast), matching tools/global_native_scores.py --fp32 and global_crop_scores.py
+	with torch.inference_mode():
+		text_prompts = build_text_prompts(
+			g_model, g_data.get_cls_names(), open_clip.get_tokenizer(args.model), device, args.dataset)
+	text_prompts = {
+		k: F.normalize(v.to(device=device, dtype=torch.float32), dim=0).contiguous()
+		for k, v in text_prompts.items()
+	}
 	g_loader = torch.utils.data.DataLoader(
 		g_data,
 		batch_size=args.test_batch_size,
@@ -683,10 +737,69 @@ def compute_frozen_global_scores(args, text_prompts, device):
 
 		scores.update(zip(items["img_path"], prob.cpu().tolist()))
 
+	# --global_crop_grid g: the same square at g * size px, cut into g x g tiles of
+	# the native size and scored like the whole image; the most anomalous tile is
+	# averaged with the whole-image score (tools/global_crop_scores.py offline)
+	if args.global_crop_grid > 0:
+		gr, ts = args.global_crop_grid, args.global_image_size
+		c_data = build_dataset(args, image_transform(gr * ts, is_train=False), *build_target_transforms(gr * ts))
+		c_loader = torch.utils.data.DataLoader(
+			c_data, batch_size=args.test_batch_size, shuffle=False,
+			num_workers=args.num_workers, pin_memory=(device == "cuda"))
+		for items in tqdm(c_loader, desc=f"Frozen global tiles {gr}x{gr}", leave=True):
+			images = items["img"].to(device, non_blocking=True)
+			cls_names = list(items["cls_name"])
+			B = images.shape[0]
+			tiles = images.reshape(B, 3, gr, ts, gr, ts).permute(0, 2, 4, 1, 3, 5).reshape(B * gr * gr, 3, ts, ts)
+			prob = torch.zeros(B, gr * gr, device=device)
+			for x in (tiles, torch.flip(tiles, dims=[3])):
+				with torch.inference_mode():
+					g = torch.cat([g_model.encode_image(ch, args.features_list)[0]
+								   for ch in x.split(args.test_batch_size)], 0)
+					g = F.normalize(g.float(), dim=-1).reshape(B, gr * gr, -1)
+					for i, c in enumerate(cls_names):
+						prob[i] += (1.0 - torch.softmax((g[i] @ text_prompts[c]).float() / args.global_fusion_temperature, dim=-1)[:, 0]) / 2
+			for path, m in zip(items["img_path"], prob.max(dim=1).values.cpu().tolist()):
+				scores[path] = (scores[path] + m) / 2
+
 	del g_model
 	if device == "cuda":
 		torch.cuda.empty_cache()
 
+	return scores
+
+
+def load_frozen_global_scores(path, temperature):
+	"""The scores of compute_frozen_global_scores, from a saved
+	tools/global_native_scores.py --fp32 run (g_cos and g_cos_flip per image path),
+	which that function reproduces. Saves the CLIP pass when one dataset is scored
+	with many checkpoints; a missing image path fails at the fusion step."""
+	d = np.load(path)
+
+	def prob(cos):
+		z = np.where(np.isnan(cos), -np.inf, cos / temperature)
+		z = z - z.max(axis=1, keepdims=True)
+		e = np.exp(z)
+		return 1.0 - e[:, 0] / e.sum(axis=1)
+
+	p = (prob(d["g_cos"]) + prob(d["g_cos_flip"])) / 2
+	return dict(zip(d["img_path"].tolist(), p.tolist()))
+
+
+def add_cached_crop_scores(scores, path, temperature):
+	"""Average the most anomalous tile from a saved tools/global_crop_scores.py run
+	into the whole-image scores, as --global_crop_grid does online."""
+	d = np.load(path)
+
+	def prob(cos):
+		z = np.where(np.isnan(cos), -np.inf, cos / temperature)
+		z = z - z.max(axis=-1, keepdims=True)
+		e = np.exp(z)
+		return 1.0 - e[..., 0] / e.sum(axis=-1)
+
+	tile = ((prob(d["g_crop_cos"]) + prob(d["g_crop_cos_flip"])) / 2).max(axis=1)
+	for path_i, m in zip(d["img_path"].tolist(), tile.tolist()):
+		scores[path_i] = (scores[path_i] + m) / 2
 	return scores
 
 
@@ -751,7 +864,15 @@ def test(args):
 
 	global_scores = None
 	if args.global_fusion_weight > 0:
-		global_scores = compute_frozen_global_scores(args, text_prompts, device)
+		if args.global_scores_npz:
+			global_scores = load_frozen_global_scores(args.global_scores_npz, args.global_fusion_temperature)
+			if args.global_crop_grid > 0:
+				if not args.global_crop_npz:
+					raise ValueError("--global_scores_npz with --global_crop_grid > 0 needs --global_crop_npz "
+									 "(or --global_crop_grid 0 for the whole-image score alone)")
+				global_scores = add_cached_crop_scores(global_scores, args.global_crop_npz, args.global_fusion_temperature)
+		else:
+			global_scores = compute_frozen_global_scores(args, text_prompts, device)
 		logger.info(
 			f"Frozen CLIP global score at {args.global_image_size} px for {len(global_scores)} images; "
 			f"image score = {1 - args.global_fusion_weight:g} * map + {args.global_fusion_weight:g} * global."
@@ -775,13 +896,19 @@ def test(args):
 
 	hybrid_state = checkpoint["hybrid_codebook"]
 
-	if "learnable_entries" not in hybrid_state:
-		raise KeyError(
-			f"'learnable_entries' not found in checkpoint['hybrid_codebook']. "
-			f"Available keys: {list(hybrid_state.keys())}"
-		)
+	# train.py --per_layer_codebook saves one codebook per feature layer
+	per_layer = bool(checkpoint.get("per_layer_codebook", False))
+	if per_layer:
+		saved_list = [hybrid_state[f"{l}.learnable_entries"] for l in range(len(args.features_list))]
+	else:
+		if "learnable_entries" not in hybrid_state:
+			raise KeyError(
+				f"'learnable_entries' not found in checkpoint['hybrid_codebook']. "
+				f"Available keys: {list(hybrid_state.keys())}"
+			)
+		saved_list = [hybrid_state["learnable_entries"]]
 
-	saved_learnable = hybrid_state["learnable_entries"]
+	saved_learnable = saved_list[0]
 	num_learnable = saved_learnable.shape[0]
 
 	calib_entries = None
@@ -800,18 +927,26 @@ def test(args):
 		else:
 			calib_entries = semantic_embeddings
 
-	hybrid_codebook = HybridCodebook(
-		semantic_embeddings=semantic_embeddings if args.with_semantic_codebook else None,
-		calib_semantic_embeddings=calib_entries,
-		num_learnable=num_learnable,
-		embed_dim=semantic_embeddings.shape[-1],
-		beta=args.beta
-	).to(device)
+	def make_codebook(entries):
+		cb = HybridCodebook(
+			semantic_embeddings=semantic_embeddings if args.with_semantic_codebook else None,
+			calib_semantic_embeddings=calib_entries,
+			num_learnable=entries.shape[0],
+			embed_dim=semantic_embeddings.shape[-1],
+			beta=args.beta
+		).to(device)
+		with torch.no_grad():
+			cb.learnable_entries.copy_(entries.to(device))
+		return cb.eval()
 
-	with torch.no_grad():
-		hybrid_codebook.learnable_entries.copy_(saved_learnable.to(device))
-
-	hybrid_codebook.eval()
+	# codebooks[l] quantizes feature layer l; with a shared codebook every entry
+	# is the same module. hybrid_codebook names the last one for the diagnostics.
+	codebooks = [make_codebook(e) for e in saved_list]
+	if not per_layer:
+		codebooks = codebooks * len(args.features_list)
+	hybrid_codebook = codebooks[-1]
+	if per_layer:
+		logger.info(f"Per-layer codebooks: {len(codebooks)} x {num_learnable} entries.")
 
 	if args.with_semantic_codebook:
 		logger.info(
@@ -863,6 +998,7 @@ def test(args):
 
 	results = {
 		"cls_names": [],
+		"img_paths": [],
 		"imgs_masks": [],
 		"anomaly_maps": [],
 		"gt_sp": [],
@@ -873,6 +1009,7 @@ def test(args):
 	# at model resolution as float16; the evaluator upsamples them to the raw GT
 	# size (where the absolute saturation thresholds are defined).
 	dump_records = defaultdict(list) if args.dump_maps else None
+	map_scores = {}		# image path -> map term of the image score, for --dump_image_scores
 	dump_root = os.path.join(args.save_path, "dump") if args.dump_maps else None
 
 	# Diagnostic: how often the semantic half of the codebook is actually selected.
@@ -913,6 +1050,9 @@ def test(args):
 			image_features, patch_tokens = model.encode_image(images, args.features_list)
 
 			patch_tokens = linearlayer(patch_tokens)
+			if args.tta_flip:		# mirrored pass, averaged into the map below
+				_, patch_tokens_flip = model.encode_image(torch.flip(images, dims=[3]), args.features_list)
+				patch_tokens_flip = linearlayer(patch_tokens_flip)
 
 			grouped_indices = defaultdict(list)
 			for i, cls_name in enumerate(cls_names):
@@ -955,7 +1095,7 @@ def test(args):
 						args.model
 					)
 
-					ret = hybrid_codebook(
+					ret = codebooks[layer_idx](
 						layer_tokens,
 						assign_temperature=args.assign_temperature,
 						semantic_bias=args.semantic_bias,
@@ -1058,6 +1198,9 @@ def test(args):
 					acc_map = layer_map if acc_map is None else acc_map + layer_map
 
 				acc_map = acc_map / len(patch_tokens)
+				if args.tta_flip:
+					acc_flip = anomaly_map_from_tokens(patch_tokens_flip, idx_tensor, text_features_g, codebooks, args)
+					acc_map = 0.5 * (acc_map + torch.flip(acc_flip, dims=[-1]))
 				acc_map = gaussian_blur_maps(acc_map, args.smooth_sigma)
 
 				# Image-level score from top-k mean of the pixel anomaly map. With several
@@ -1072,6 +1215,7 @@ def test(args):
 					], dim=1).mean(dim=1)
 					for local_i, global_i in enumerate(indices):
 						s = img_score[local_i].detach().cpu().item()
+						map_scores[img_paths[global_i]] = s
 						if global_scores is not None:
 							w = args.global_fusion_weight
 							s = (1.0 - w) * s + w * global_scores[img_paths[global_i]]
@@ -1087,6 +1231,7 @@ def test(args):
 			anomaly_map_np = anomaly_maps_gpu[b].float().cpu().numpy()
 
 			results["cls_names"].append(cls_name)
+			results["img_paths"].append(img_path)
 			results["imgs_masks"].append(gt_masks[b:b+1])
 			results["gt_sp"].append(items["anomaly"][b].item())
 			results["pr_sp"].append(pr_sp_list[b])
@@ -1166,6 +1311,16 @@ def test(args):
 			100.0 * resid_chance_defect / resid_total,
 		)
 
+	if args.dump_image_scores:
+		paths = results["img_paths"]
+		np.savez(
+			os.path.join(args.save_path, "image_scores.npz"),
+			img_path=np.array(paths), cls_name=np.array(results["cls_names"]),
+			label=np.array(results["gt_sp"]), score=np.array(results["pr_sp"], dtype=np.float64),
+			map_score=np.array([map_scores.get(p, np.nan) for p in paths], dtype=np.float64),
+			global_score=np.array([global_scores[p] if global_scores is not None else np.nan for p in paths], dtype=np.float64),
+		)
+
 	table_str = evaluate_metrics(
 		results=results,
 		obj_list=obj_list,
@@ -1200,12 +1355,15 @@ if __name__ == "__main__":
 	parser.add_argument("--image_adaptor_hidden_dim", type=int, default=None, help="hidden dim of image adaptor, None means embed_dim")
 	parser.add_argument("--image_adaptor_dropout", type=float, default=0.1, help="dropout for image adaptor architecture")
 	parser.add_argument("--image_score_mode", type=str, default="topk_map", choices=["global", "topk_map"], help="image-level anomaly score source: 'global' branch or 'topk_map' pooling of the pixel anomaly map")
-	parser.add_argument("--topk_ratio", type=float, nargs="+", default=[0.001], help="fraction(s) of top pixels averaged for the topk_map image score (k>=1); with several values the score is the mean of the top-k means (multi-scale read-out)")
-	parser.add_argument("--global_fusion_weight", type=float, default=0.0, help="weight w of the frozen CLIP zero-shot image score in the topk_map image score, (1-w)*map + w*global; 0 disables")
+	parser.add_argument("--topk_ratio", type=float, nargs="+", default=[0.0005, 0.001, 0.005, 0.01, 0.05, 0.1], help="fraction(s) of top pixels averaged for the topk_map image score (k>=1); with several values the score is the mean of the top-k means (multi-scale read-out). Default: the grid of the paper; 0.001 alone gives the earlier single-fraction read-out")
+	parser.add_argument("--global_fusion_weight", type=float, default=0.75, help="weight w of the frozen CLIP zero-shot image score in the topk_map image score, (1-w)*map + w*global; 0 disables (map-only image score)")
 	parser.add_argument("--global_fusion_temperature", type=float, default=0.1, help="softmax temperature of the frozen CLIP global score")
+	parser.add_argument("--global_scores_npz", type=str, default="", help="load the frozen global scores from a tools/global_native_scores.py --fp32 output instead of recomputing them")
+	parser.add_argument("--global_crop_grid", type=int, default=3, help="also score g x g tiles of the image at the native size and average the most anomalous tile into the global score; 0 disables (read-out B of the earlier draft)")
+	parser.add_argument("--global_crop_npz", type=str, default="", help="with --global_scores_npz: load the tile scores from a tools/global_crop_scores.py output")
 	parser.add_argument("--global_image_size", type=int, default=336, help="input size of the frozen CLIP that computes the global score (its native resolution)")
 	parser.add_argument("--split", type=str, default="test", help="dataset split to evaluate; use 'valid' to tune hyperparameters off-test (bmad only)")
-	parser.add_argument("--score_blend", type=float, default=1.0, help="pixel scoring: convex blend alpha*raw_patch + (1-alpha)*z_q before text similarity (0=hard-quant/current, 1=raw CLIP feature)")
+	parser.add_argument("--score_blend", type=float, default=0.0, help="pixel scoring: convex blend alpha*raw_patch + (1-alpha)*z_q before text similarity (0 = hard quantization, the paper; 1 = raw CLIP feature)")
 
 	# runtime
 	parser.add_argument("--seed", type=int, default=42, help="random seed")
@@ -1213,6 +1371,7 @@ if __name__ == "__main__":
 	parser.add_argument("--prefetch_factor", type=int, default=2, help="dataloader prefetch factor")
 	parser.add_argument("--test_batch_size", type=int, default=8, help="test batch size")
 	parser.add_argument("--save_vis", action="store_true", help="save anomaly visualization")
+	parser.add_argument("--dump_image_scores", action="store_true", help="save per-image map, global and fused image scores to save_path/image_scores.npz")
 	parser.add_argument("--dump_maps", action="store_true", help="dump per-image anomaly maps (float16) + image scores under <save_path>/dump for the standalone AU-sPRO evaluator (tools/loco_spro_eval.py)")
 	parser.add_argument("--dump_stride", type=int, default=1, help="subsample dumped maps by this factor before writing; 1 keeps full resolution (required for AU-sPRO), 4 is enough for offline read-out studies and cuts the dump 16x")
 	parser.add_argument("--fast", action="store_true", help="enable faster CUDA settings")
@@ -1220,7 +1379,7 @@ if __name__ == "__main__":
 	# codebook
 	parser.add_argument("--beta", type=float, default=0.1, help="commitment loss weight inside hybrid codebook")
 	parser.add_argument("--assign_temperature", type=float, default=0.1, help="soft assignment temperature")
-	parser.add_argument("--smooth_sigma", type=float, default=0.0, help="Gaussian sigma applied to the anomaly map before scoring; 0 disables. Stabilizes the top-k read-out, which at small rho otherwise pools barely more than one token")
+	parser.add_argument("--smooth_sigma", type=float, default=4.0, help="Gaussian sigma applied to the anomaly map before scoring and evaluation (4 in the paper); 0 disables")
 	parser.add_argument("--assign_mode", type=str, default="raw", choices=["raw", "center", "zscore"], help="how the two halves of the codebook compete at assignment time: raw cosine, per-half mean removal (cancels the modality-gap offset), or per-half standardized similarity (competes on rank)")
 	parser.add_argument("--semantic_bias", type=float, default=0.0, help="additive offset on the semantic logits at assignment time; compensates the modality gap that otherwise keeps the semantic half from ever being the argmax (0 = off)")
 	parser.add_argument("--with_semantic_codebook", action="store_true", help="ablation (Sec. 'Does the codebook need the target vocabulary?'): append frozen target-vocabulary entries to the codebook. Off by default: they win <0.05%% of assignments and change no metric")
@@ -1229,7 +1388,8 @@ if __name__ == "__main__":
 	parser.add_argument("--calib_control", type=str, default="text", choices=["text", "random"], help="control for --semantic_calibration. Adding N near-zero-probability entries lowers the normalized entropy mechanically, because it is divided by log(K+N); 'random' substitutes N random unit directions for the text entries so that any gain from 'text' can be attributed to semantics rather than to the count")
 
 	# pixel calibration
-	parser.add_argument("--cali", action="store_true", help="enable entropy adaptive temperature calibration for pixel-level map")
+	parser.add_argument("--cali", action=argparse.BooleanOptionalAction, default=True, help="entropy-adaptive temperature for the pixel map (on in the paper); --no-cali scores every pixel at --temperature")
+	parser.add_argument("--tta_flip", action="store_true", help="average the anomaly map with that of the horizontally flipped image (flipped back) before smoothing")
 
 	# evaluation
 	parser.add_argument("--eval_workers", type=int, default=4, help="number of processes for metric evaluation")

@@ -89,7 +89,9 @@ def main():
 		num_workers=args.num_workers, pin_memory=(device == "cuda"))
 	obj_list = test_data.get_cls_names()
 
-	with torch.inference_mode(), torch.cuda.amp.autocast(enabled=use_amp):
+	# with --fp32 the text anchors are fp32 too, as in tools/global_crop_scores.py and
+	# test.py's global pass, so whole-image and tile scores share one set of anchors
+	with torch.inference_mode(), torch.cuda.amp.autocast(enabled=use_amp and not args.fp32):
 		text_prompts = build_text_prompts(model, obj_list, tokenizer, device, args.dataset)
 	text_prompts = {
 		k: F.normalize(v.to(device=device, dtype=torch.float32), dim=0).contiguous()

@@ -90,6 +90,7 @@ def main():
 	ap.add_argument("--native_root", default="results/globalnative")
 	ap.add_argument("--head_root", default="results/globalhead")
 	ap.add_argument("--wise_root", default="results/globalhead_wise")
+	ap.add_argument("--crop_root", default="results/globalcrop", help="tools/global_crop_scores.py output (3x3 tiles in g3/)")
 	ap.add_argument("--main_log", default="results/multiseed/s{seed}/{ds}/log.txt",
 					help="test.py log of the industrial targets; cleanrun.bsub writes results/stage2_final_{tag}/{ds}/log.txt")
 	args = ap.parse_args()
@@ -115,8 +116,9 @@ def main():
 					img[lab][ds].append((np.nan, np.nan))
 				continue
 			c = candidates(d)
-			for lab, name in variants:
-				img[lab][ds].append(per_class_metric(d["label"].astype(int), d["cls_name"], c[name]))
+			for lab, name in variants:		# a candidate is missing while its inputs are not computed
+				img[lab][ds].append(per_class_metric(d["label"].astype(int), d["cls_name"], c[name])
+									if name in c else (np.nan, np.nan))
 		j = loco_json(f"final_{tag}")
 		d = load_scores(args, tag, "loco")
 		if j is None or d is None:
@@ -128,7 +130,7 @@ def main():
 		loco_pix.append(j)
 		c = candidates(d)
 		for lab, name in variants:
-			loco_img[lab].append(loco_image(d, c[name]))
+			loco_img[lab].append(loco_image(d, c[name]) if name in c else {"L": np.nan, "S": np.nan})
 
 	# the first variant must be the map-only read-out test.py logs: check it
 	lab0, _ = variants[0]

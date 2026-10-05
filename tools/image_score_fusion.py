@@ -37,16 +37,16 @@ TEMPS = (0.01, 0.02, 0.05, 0.1)
 WEIGHTS = (0.1, 0.25, 0.5, 0.6, 0.75, 0.9)
 FUSE_RHOS = (0.0005, 0.001, 0.005, 0.01, 0.05)
 NATIVE_SIZES = (336,)					# tools/global_native_scores.py resolutions
-FROZEN_G = re.compile(r"^(G(\d+f?)?|H\d+f?|HW[\d.]+f|GHf)@")	# global scores: frozen G@, G336@, G336f@;
+FROZEN_G = re.compile(r"^(G(\d+f?(T\d)?)?|H\d+f?|HW[\d.]+f|GHf)@")	# global scores: frozen G@, G336@, G336f@;
 															# trained head H336@, H336f@, HW<lam>f@; average GHf@
 
 
 def anomaly_prob(cos, T):
-	"""cos [N, C] (NaN past a product's class count), class 0 = normal."""
+	"""cos [..., C] (NaN past a product's class count), class 0 = normal."""
 	z = np.where(np.isnan(cos), -np.inf, cos / T)
-	z = z - z.max(axis=1, keepdims=True)
+	z = z - z.max(axis=-1, keepdims=True)
 	e = np.exp(z)
-	return 1.0 - e[:, 0] / e.sum(axis=1)
+	return 1.0 - e[..., 0] / e.sum(axis=-1)
 
 
 def candidates(d):
@@ -79,6 +79,10 @@ def candidates(d):
 				p = anomaly_prob(d[f"g{sz}_cos"], T)
 				c[f"G{sz}@{T}"] = p
 				c[f"G{sz}f@{T}"] = (p + anomaly_prob(d[f"g{sz}_cos_flip"], T)) / 2
+				# 3x3 tiles (tools/global_crop_scores.py): most anomalous tile averaged in
+				if sz == 336 and "gcrop3_cos" in d:
+					tile = (anomaly_prob(d["gcrop3_cos"], T) + anomaly_prob(d["gcrop3_cos_flip"], T)) / 2
+					c[f"G{sz}fT3@{T}"] = (c[f"G{sz}f@{T}"] + tile.max(axis=1)) / 2
 	if "h_cos" in d:
 		for T in TEMPS:
 			p = anomaly_prob(d["h_cos"], T)
@@ -174,6 +178,12 @@ def load_scores(args, tag, ds):
 			print(f"[check] {tag}/{ds}: 518 px g_cos max |diff| vs imgscore = {dev:.2e}")
 			continue
 		d[f"g{sz}_cos"], d[f"g{sz}_cos_flip"] = g["g_cos"], g["g_cos_flip"]
+	crop_root = getattr(args, "crop_root", None)
+	pc = os.path.join(crop_root, "g3", ds + ".npz") if crop_root else None
+	if pc and os.path.isfile(pc):
+		g = np.load(pc, allow_pickle=False)
+		assert (g["img_path"] == d["img_path"]).all(), f"image order differs: {pc}"
+		d["gcrop3_cos"], d["gcrop3_cos_flip"] = g["g_crop_cos"], g["g_crop_cos_flip"]
 	return d
 
 
