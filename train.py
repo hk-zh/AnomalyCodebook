@@ -23,7 +23,8 @@ from model import LinearLayer, HybridCodebook
 from loss import FocalLoss, BinaryDiceLoss
 
 from prompts.prompt_ensemble_mvtec_object_agnostic import encode_text_with_prompt_ensemble as encode_text_with_prompt_ensemble_mvtec
-from prompts.prompt_ensemble_visa_19cls import encode_text_with_prompt_ensemble as encode_text_with_prompt_ensemble_visa
+# VisA as a source uses the same region-style, product-free prompts as every other dataset
+from prompts.prompt_ensemble_visa_object_agnostic import encode_text_with_prompt_ensemble as encode_text_with_prompt_ensemble_visa
 from prompts.prompt_ensemble_mpdd_object_agnostic import encode_text_with_prompt_ensemble as encode_text_with_prompt_ensemble_mpdd
 from prompts.prompt_ensemble_real_IAD_simple import encode_text_with_prompt_ensemble as encode_text_with_prompt_ensemble_real_iad
 
@@ -284,31 +285,27 @@ def train(args):
 		args.model
 	).to(device)
 
-	n_layers = len(args.features_list)
-	if args.per_layer_codebook:
-		# one codebook per feature layer, each reseeded and revived from its own layer
-		hybrid_codebook = torch.nn.ModuleList([
-			HybridCodebook(
-				num_learnable=args.codebook_num_learnable,
-				embed_dim=model_configs["embed_dim"],
-				beta=args.beta
-			) for _ in range(n_layers)
-		]).to(device)
-		codebooks = list(hybrid_codebook)
-	else:
+	# one codebook shared by all feature layers; --no_codebook (the no-codebook ablation):
+	# the same adapters, prompts and loss without L_quant, and no codebook anywhere
+	# (hence no k-means warm-up and no revival)
+	hybrid_codebook = None
+	if not args.no_codebook:
 		hybrid_codebook = HybridCodebook(
 			num_learnable=args.codebook_num_learnable,
 			embed_dim=model_configs["embed_dim"],
 			beta=args.beta
 		).to(device)
-		codebooks = [hybrid_codebook] * n_layers
 
 	# In the stab* checkpoints the global token collapses onto one prototype
 	# that no patch ever selects (tools/prototype_usage.py), so the branch only
 	# occupies a codebook slot; --no_image_branch removes it altogether.
 	image_adaptor = None
 	image_params = []
-	if not args.no_image_branch:
+	# without a codebook the global branch has no loss left (its BCE weight is 0 in the
+	# reported objective, and its quantization loss is gone), so it is not built
+	if args.no_codebook and args.image_loss_weight > 0:
+		raise ValueError("--no_codebook drops the global branch; it needs --image_loss_weight 0")
+	if not args.no_image_branch and not args.no_codebook:
 		image_adaptor = GlobalImageAdaptor(
 			embed_dim=model_configs["embed_dim"],
 			hidden_dim=args.image_adaptor_hidden_dim,
@@ -318,7 +315,10 @@ def train(args):
 		image_params = list(image_adaptor.parameters())
 
 	trainable_layer.train()
-	hybrid_codebook.train()
+	codebook_params = []
+	if hybrid_codebook is not None:
+		hybrid_codebook.train()
+		codebook_params = list(hybrid_codebook.parameters())
 
 	loss_focal = FocalLoss()
 	loss_dice = BinaryDiceLoss()
@@ -339,34 +339,33 @@ def train(args):
 
 	print_model_stats("CLIP model", model)
 	print_model_stats("Linear layer", trainable_layer)
-	print_model_stats("Hybrid codebook", hybrid_codebook)
+	if hybrid_codebook is not None:
+		print_model_stats("Hybrid codebook", hybrid_codebook)
+		for name, buf in hybrid_codebook.named_buffers():
+			print(f"HybridCodebook BUFFER {name}: shape={tuple(buf.shape)} numel={buf.numel():,}")
 	if image_adaptor is not None:
 		print_model_stats("Image adaptor", image_adaptor)
 
-	for name, buf in hybrid_codebook.named_buffers():
-		print(f"HybridCodebook BUFFER {name}: shape={tuple(buf.shape)} numel={buf.numel():,}")
-
 	optimizer = torch.optim.Adam(
 		list(trainable_layer.parameters())
-		+ list(hybrid_codebook.parameters())
+		+ codebook_params
 		+ image_params,
 		lr=args.learning_rate,
 		betas=(0.5, 0.999)
 	)
-
 	global_step = 0
 	warmup_feats = []
-	warmup_feats_layer = [[] for _ in range(n_layers)]
 
 	def save_checkpoint(path, epoch_no):
 		ckpt = {
 			"epoch": epoch_no,
 			"global_step": global_step,
 			"trainable_linearlayer": trainable_layer.state_dict(),
-			"hybrid_codebook": hybrid_codebook.state_dict(),
-			"per_layer_codebook": bool(args.per_layer_codebook),
+			"no_codebook": bool(args.no_codebook),
 			"optimizer": optimizer.state_dict(),
 		}
+		if hybrid_codebook is not None:
+			ckpt["hybrid_codebook"] = hybrid_codebook.state_dict()
 		if image_adaptor is not None:
 			ckpt["image_adaptor"] = image_adaptor.state_dict()
 		torch.save(ckpt, path)
@@ -374,7 +373,8 @@ def train(args):
 
 	for epoch in range(epochs):
 		trainable_layer.train()
-		hybrid_codebook.train()
+		if hybrid_codebook is not None:
+			hybrid_codebook.train()
 		if image_adaptor is not None:
 			image_adaptor.train()
 		model.eval()
@@ -417,7 +417,7 @@ def train(args):
 						text_features=text_features,
 						anomaly_labels=anomaly_label,
 						image_adaptor=image_adaptor,
-						hybrid_codebook=codebooks[-1],
+						hybrid_codebook=hybrid_codebook,
 						temperature=args.image_temperature
 					)
 				else:
@@ -434,28 +434,14 @@ def train(args):
 				# a large part of the run-to-run spread. We therefore reseed the
 				# codebook from real features once the adapters have warmed up, and
 				# periodically revive entries that have gone unused.
-				if args.codebook_init == "warmup_kmeans" and global_step <= args.codebook_warmup_steps:
+				if hybrid_codebook is not None and args.codebook_init == "warmup_kmeans" and global_step <= args.codebook_warmup_steps:
 					with torch.no_grad():
-						for l, lt in enumerate(patch_tokens_list):
+						for lt in patch_tokens_list:
 							f = lt.detach().reshape(-1, lt.shape[-1]).float()
 							take = min(args.warmup_feats_per_step, f.shape[0])
 							sel = torch.randperm(f.shape[0], device=f.device)[:take]
-							if args.per_layer_codebook:
-								warmup_feats_layer[l].append(f[sel].cpu())
-							else:
-								warmup_feats.append(f[sel].cpu())
-					if global_step == args.codebook_warmup_steps and args.per_layer_codebook:
-						for l, cb in enumerate(codebooks):
-							feats = torch.cat(warmup_feats_layer[l], dim=0).to(device)
-							n_init = cb.init_from_features(feats)
-							logger.info(
-								"layer %d: reseeded %d prototypes by spherical k-means on %d warm-up features",
-								l, n_init, feats.shape[0]
-							)
-							warmup_feats_layer[l].clear()
-							del feats
-						torch.cuda.empty_cache()
-					elif global_step == args.codebook_warmup_steps and len(warmup_feats) > 0:
+							warmup_feats.append(f[sel].cpu())
+					if global_step == args.codebook_warmup_steps and len(warmup_feats) > 0:
 						feats = torch.cat(warmup_feats, dim=0).to(device)
 						n_init = hybrid_codebook.init_from_features(feats)
 						logger.info(
@@ -475,26 +461,22 @@ def train(args):
 					or args.codebook_init != "warmup_kmeans"
 					or global_step > args.codebook_warmup_steps
 				)
-				if args.revive_every > 0 and global_step % args.revive_every == 0 and revive_ok:
+				if hybrid_codebook is not None and args.revive_every > 0 and global_step % args.revive_every == 0 and revive_ok:
 					with torch.no_grad():
-						if args.per_layer_codebook:
-							n_rev = sum(
-								cb.revive_dead(lt.detach().reshape(-1, lt.shape[-1]))
-								for cb, lt in zip(codebooks, patch_tokens_list)
-							)
-						else:
-							f = patch_tokens_list[-1].detach().reshape(-1, patch_tokens_list[-1].shape[-1])
-							n_rev = hybrid_codebook.revive_dead(f)
+						f = patch_tokens_list[-1].detach().reshape(-1, patch_tokens_list[-1].shape[-1])
+						n_rev = hybrid_codebook.revive_dead(f)
 					if n_rev > 0:
 						logger.info("step %d: revived %d dead prototypes", global_step, n_rev)
 
 				for layer_idx in range(len(patch_tokens_list)):
 					layer_tokens = patch_tokens_list[layer_idx]
 
-					ret = codebooks[layer_idx](layer_tokens)
-
-					patch_tokens_q = ret["z_q_st"]
-					patch_quant_loss = patch_quant_loss + ret["quant_loss"]
+					if hybrid_codebook is None:
+						patch_tokens_q = layer_tokens
+					else:
+						ret = hybrid_codebook(layer_tokens)
+						patch_tokens_q = ret["z_q_st"]
+						patch_quant_loss = patch_quant_loss + ret["quant_loss"]
 
 					patch_tokens_q = F.normalize(patch_tokens_q, dim=-1)
 					seg_logits = (patch_tokens_q @ text_features) / args.temperature
@@ -514,6 +496,8 @@ def train(args):
 					seg_prob = torch.softmax(seg_logits, dim=1)
 					seg_prob_list.append(seg_prob)
 
+				if hybrid_codebook is None:
+					patch_quant_loss = torch.zeros((), device=device)
 				patch_quant_loss = patch_quant_loss / len(patch_tokens_list)
 
 				construction_loss = 0.0
@@ -567,7 +551,7 @@ def train(args):
 			if args.grad_clip > 0:
 				torch.nn.utils.clip_grad_norm_(
 					list(trainable_layer.parameters())
-					+ list(hybrid_codebook.parameters())
+					+ codebook_params
 					+ image_params,
 					max_norm=args.grad_clip
 				)
@@ -609,11 +593,11 @@ def train(args):
 				)
 			)
 			logger.info("epoch %d: map_image_loss: %.4f", epoch + 1, np.mean(map_image_loss_list))
-			logger.info(
-				"epoch %d: %d/%d prototypes live",
-				epoch + 1, sum(cb.live_codes() for cb in set(codebooks)),
-				sum(cb.num_learnable for cb in set(codebooks))
-			)
+			if hybrid_codebook is not None:
+				logger.info(
+					"epoch %d: %d/%d prototypes live",
+					epoch + 1, hybrid_codebook.live_codes(), hybrid_codebook.num_learnable
+				)
 
 		if (epoch + 1) % args.save_freq == 0:
 			save_checkpoint(os.path.join(args.save_path, "epoch_" + str(epoch + 1) + ".pth"), epoch + 1)
@@ -666,7 +650,7 @@ if __name__ == "__main__":
 	parser.add_argument("--legacy_revive_at_init", action="store_true", help="reproduce the stab* checkpoints: allow a revive check on the k-means reseed step, which then replaces every center (usage was just zeroed) with one batch of worst-covered layer-24 tokens")
 	parser.add_argument("--beta", type=float, default=0.1, help="commitment loss weight inside codebook")
 	parser.add_argument("--vq_weight", type=float, default=0.25, help="weight for patch-level quantization loss")
-	parser.add_argument("--per_layer_codebook", action="store_true", help="one codebook of codebook_num_learnable entries per feature layer instead of one shared by all layers")
+	parser.add_argument("--no_codebook", action="store_true", help="no-codebook arm: no codebook, no quantization loss, no global branch; the segmentation logits come from the continuous adapted feature (score with test.py --no-cali)")
 
 	args = parser.parse_args()
 	if args.no_image_branch and args.image_loss_weight > 0:

@@ -210,9 +210,14 @@ __marimo__/
 # Project Specific
 data
 exps
-bsub_log
-papers
-# Third-party baselines
-baselines
-*.bsub
 results
+bsub
+bsub_log
+*.bsub
+papers
+slides/
+# third-party baselines (separate clones)
+baselines
+# the paper is its own (Overleaf-synced) repository
+latex/
+.vscode/

@@ -8,3 +8,10 @@ python train.py --dataset mvtec --train_data_path ./data/mvtec --save_path ./exp
 	--codebook_warmup_steps 100 --revive_every 100 --legacy_revive_at_init --seed 42
 python test.py --dataset visa --data_path ./data/visa --checkpoint_path ./exps/stab42/epoch_1.pth \
 	--save_path ./results/visa
+
+# No-codebook ablation (Sec. 4.4): the same adapters, prompts and loss without the
+# codebook or L_quant, scored at the training temperature (--no-cali).
+python train.py --dataset mvtec --train_data_path ./data/mvtec --save_path ./exps/nocb42/ \
+	--epoch 1 --no_codebook --seed 42
+python test.py --dataset visa --data_path ./data/visa --checkpoint_path ./exps/nocb42/epoch_1.pth \
+	--save_path ./results/visa_nocb --no-cali

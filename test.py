@@ -4,6 +4,7 @@
 import os
 import cv2
 import json
+import time
 import torch
 import random
 import logging
@@ -63,6 +64,17 @@ class GlobalImageAdaptor(torch.nn.Module):
 	def forward(self, x):
 		x = x.float()
 		return F.normalize(x + self.net(x), dim=-1)
+
+
+class NoCodebook(torch.nn.Module):
+	"""Stand-in codebook for a checkpoint trained with train.py --no_codebook: every
+	patch feature is its own code, and there is no assignment to take an entropy of."""
+	num_semantic = 0
+	num_learnable = 0
+
+	def forward(self, z, **kwargs):
+		return {"z_q_st": z, "assign_probs": None, "raw_logits": None,
+				"indices": None, "resid_indices": None}
 
 
 def setup_seed(seed: int) -> None:
@@ -154,13 +166,51 @@ def cal_pro_score(masks: np.ndarray, amaps: np.ndarray, max_step: int = 200, exp
 	return auc(fprs, pros)
 
 
-def gaussian_blur_maps(maps: torch.Tensor, sigma: float) -> torch.Tensor:
+def cal_pro_score_fast(masks: np.ndarray, amaps: np.ndarray, max_step: int = 200, expect_fpr: float = 0.3) -> float:
+	"""cal_pro_score with the same thresholds and the same result, but each mask is
+	labelled once and the per-threshold counts come from sorted values instead of
+	re-labelling every mask at every threshold. Used by the --map_variants
+	evaluator, whose reported-setting variant checks it against cal_pro_score."""
+	min_th, max_th = amaps.min(), amaps.max()
+	if abs(max_th - min_th) < 1e-12:
+		return 0.0
+	delta = (max_th - min_th) / max_step
+	region_vals = []
+	for amap, mask in zip(amaps, masks):
+		for region in measure.regionprops(measure.label(mask)):
+			region_vals.append(np.sort(amap[region.coords[:, 0], region.coords[:, 1]]))
+	neg = np.sort(amaps[masks == 0])
+	n_neg = max(int((masks == 0).sum()), 1)
+	pros, fprs = [], []
+	for th in np.arange(min_th, max_th, delta):
+		pro = [(len(v) - np.searchsorted(v, th, side="right")) / len(v) for v in region_vals]
+		pros.append(np.mean(pro) if len(pro) > 0 else 0.0)
+		fprs.append((len(neg) - np.searchsorted(neg, th, side="right")) / n_neg)
+	pros = np.array(pros)
+	fprs = np.array(fprs)
+	valid = fprs < expect_fpr
+	if valid.sum() < 2:
+		return 0.0
+	fprs = fprs[valid]
+	pros = pros[valid]
+	den = fprs.max() - fprs.min()
+	if den < 1e-12:
+		return 0.0
+	fprs = (fprs - fprs.min()) / den
+	return auc(fprs, pros)
+
+
+def gaussian_blur_maps(maps: torch.Tensor, sigma: float, padding: str = "zeros") -> torch.Tensor:
 	"""Separable Gaussian blur on a batch of anomaly maps [B, H, W].
 
 	Without this the image score is an extreme-value statistic: at rho=0.001 the
 	pooled set is about 1.4 tokens wide, so a single spurious hot patch decides
 	the image. Smoothing makes the read-out reflect a region instead, which is
 	also what the April-GAN evaluation lineage does.
+
+	padding="zeros" is the reported setting (it darkens a band of about 3 sigma
+	along the border); "reflect" mirrors the map instead, as scipy's
+	gaussian_filter does by default.
 	"""
 	if sigma is None or sigma <= 0:
 		return maps
@@ -169,6 +219,11 @@ def gaussian_blur_maps(maps: torch.Tensor, sigma: float) -> torch.Tensor:
 	kernel = torch.exp(-(x ** 2) / (2.0 * sigma * sigma))
 	kernel = kernel / kernel.sum()
 	m = maps.unsqueeze(1)
+	if padding == "reflect":
+		m = F.pad(m, (radius, radius, radius, radius), mode="reflect")
+		m = F.conv2d(m, kernel.view(1, 1, 1, -1))
+		m = F.conv2d(m, kernel.view(1, 1, -1, 1))
+		return m.squeeze(1)
 	m = F.conv2d(m, kernel.view(1, 1, 1, -1), padding=(0, radius))
 	m = F.conv2d(m, kernel.view(1, 1, -1, 1), padding=(radius, 0))
 	return m.squeeze(1)
@@ -209,7 +264,7 @@ def build_dataset(args, preprocess, target_transform_b, target_transform_type):
 		return MVTecDataset(
 			root=args.data_path,
 			transform=preprocess,
-			target_transform_b=target_transform_b,
+			target_transform=target_transform_b,
 			target_transform_type=target_transform_type,
 			aug_rate=-1,
 			mode="test"
@@ -417,47 +472,123 @@ def entropy_adaptive_softmax(sim_logits, calib_map, min_temperature=0.01, max_te
 	return seg_prob
 
 
-def anomaly_map_from_tokens(patch_tokens, idx_tensor, text_features_g, codebooks, args):
-	"""Layer-averaged anomaly map of one product group before smoothing, computed
-	as in the main loop of test() but without its diagnostics. Used for the
-	mirrored pass of --tta_flip."""
-	acc_map = None
-	for layer_idx in range(len(patch_tokens)):
-		layer_tokens = extract_patch_tokens_for_layer(
-			patch_tokens[layer_idx].index_select(0, idx_tensor), args.model)
-		ret = codebooks[layer_idx](
-			layer_tokens,
-			assign_temperature=args.assign_temperature,
-			semantic_bias=args.semantic_bias,
-			assign_mode=args.assign_mode
-		)
-		patch_used = F.normalize(ret["z_q_st"], dim=-1)
-		if args.score_blend > 0.0:
-			raw_patch = F.normalize(layer_tokens, dim=-1)
-			patch_used = F.normalize(
-				args.score_blend * raw_patch + (1.0 - args.score_blend) * patch_used, dim=-1)
-		sim_logits = torch.bmm(patch_used, text_features_g)
-		Bg, L, C = sim_logits.shape
-		H = int(np.sqrt(L))
-		sim_logits = F.interpolate(
-			sim_logits.permute(0, 2, 1).contiguous().view(Bg, C, H, H),
-			size=(args.image_size, args.image_size),
-			mode="bilinear",
-			align_corners=True
-		)
-		if args.cali:
-			calib_map = build_calibration_map(assign_probs=ret["assign_probs"], img_size=args.image_size)
-			seg_prob = entropy_adaptive_softmax(
-				sim_logits=sim_logits,
-				calib_map=calib_map,
-				min_temperature=args.temperature,
-				max_temperature=args.max_temperature
-			)
-		else:
-			seg_prob = torch.softmax(sim_logits / args.temperature, dim=1)
-		layer_map = seg_prob[:, 1:, :, :].sum(dim=1)
-		acc_map = layer_map if acc_map is None else acc_map + layer_map
-	return acc_map / len(patch_tokens)
+def layer_anomaly_map(ret, patch_used, text_features_g, args):
+	"""Anomaly probability of one layer at image resolution, [B, H_img, W_img]: with --cali the
+	entropy-adaptive temperature T(x) = T_min + (T_max - T_min) U(x), U the normalized entropy of
+	the soft assignment; with --no-cali every pixel at --temperature."""
+	B, L, _ = patch_used.shape
+	H = int(np.sqrt(L))
+	if H * H != L:
+		raise ValueError(f"L={L} is not square.")
+	sim_logits = torch.bmm(patch_used, text_features_g)
+	C = sim_logits.shape[-1]
+	sim_logits = F.interpolate(
+		sim_logits.permute(0, 2, 1).contiguous().view(B, C, H, H),
+		size=(args.image_size, args.image_size), mode="bilinear", align_corners=True)
+	if args.cali:
+		calib_map = build_calibration_map(assign_probs=ret["assign_probs"], img_size=args.image_size)
+		seg_prob = entropy_adaptive_softmax(
+			sim_logits=sim_logits, calib_map=calib_map,
+			min_temperature=args.temperature, max_temperature=args.max_temperature)
+	else:
+		seg_prob = torch.softmax(sim_logits / args.temperature, dim=1)
+	return seg_prob[:, 1:, :, :].sum(dim=1)
+
+
+# Controls for the entropy-adaptive temperature (--map_variants). A variant is
+# "<map>" or "<map>@<smoothing>", computed from the same forward pass as the
+# reported map:
+#   sched      the reported schedule T = T_min + U (T_max - T_min); a check that
+#              the variant path and the fast AUPRO reproduce the reported map
+#   fixed:T    one temperature T for every pixel (fixed:0.01 = T_min, as trained)
+#   meanT      the schedule with U replaced by its mean over the image's patches
+#   shuffle    the schedule with U permuted at random among the image's patches
+#   U          the normalized assignment entropy itself as the map
+#   post       the schedule driven by the normalized entropy of the class
+#              posterior softmax(<p_bar, t_c> / T_min) of the continuous feature,
+#              the signal that needs no codebook
+#   post_q     the same driver, rank-matched to U (see below)
+#   resid_q    the codebook distance 1 - max_j <p_bar, c_j>, rank-matched to U
+#   edge_q     the Sobel gradient magnitude of the input image averaged over each
+#              patch, rank-matched to U
+# Rank-matched drivers give the patch with the r-th smallest driver value the
+# r-th smallest U of the same image, so the temperatures used are exactly the
+# reported ones and only their arrangement over the image changes.
+# Smoothing suffixes: @sigma0 (none), @reflect (reflect padding instead of zeros).
+def _token_entropy(probs):
+	p = probs.float()
+	return -(p * torch.log(p + 1e-8)).sum(dim=-1) / np.log(p.shape[-1])
+
+
+def _rank_match(src, ref):
+	rank = src.argsort(dim=1).argsort(dim=1)
+	return ref.sort(dim=1).values.gather(1, rank)
+
+
+def _edge_tokens(images, H):
+	gray = images.float().mean(dim=1, keepdim=True)
+	kx = torch.tensor([[-1., 0., 1.], [-2., 0., 2.], [-1., 0., 1.]], device=images.device).view(1, 1, 3, 3)
+	mag = torch.sqrt(F.conv2d(gray, kx, padding=1) ** 2 + F.conv2d(gray, kx.transpose(2, 3), padding=1) ** 2)
+	return F.adaptive_avg_pool2d(mag, H).flatten(1)
+
+
+def variant_layer_map(spec, ret, patch_used, layer_tokens, text_features_g, images_g, args, gen):
+	"""Anomaly probability of one layer under control `spec` (without smoothing
+	suffix), [B, H_img, W_img]. Mirrors layer_anomaly_map's linear mode."""
+	B, L, _ = patch_used.shape
+	H = int(np.sqrt(L))
+	size = (args.image_size, args.image_size)
+	if spec == "U":
+		U = _token_entropy(ret["assign_probs"])
+		return F.interpolate(U.view(B, 1, H, H), size=size, mode="bilinear", align_corners=False).squeeze(1)
+	sim_logits = torch.bmm(patch_used, text_features_g)
+	C = sim_logits.shape[-1]
+	sim_logits = F.interpolate(
+		sim_logits.permute(0, 2, 1).contiguous().view(B, C, H, H),
+		size=size, mode="bilinear", align_corners=True)
+	if spec.startswith("fixed:"):
+		seg_prob = torch.softmax(sim_logits / float(spec.split(":", 1)[1]), dim=1)
+		return seg_prob[:, 1:, :, :].sum(dim=1)
+	U = _token_entropy(ret["assign_probs"])		# every remaining control needs the codebook
+	if spec == "sched":
+		drv = U
+	elif spec == "meanT":
+		drv = U.mean(dim=1, keepdim=True).expand_as(U)
+	elif spec == "shuffle":
+		perm = torch.stack([torch.randperm(L, generator=gen) for _ in range(B)]).to(U.device)
+		drv = U.gather(1, perm)
+	elif spec in ("post", "post_q"):
+		p_bar = F.normalize(layer_tokens.float(), dim=-1)
+		drv = _token_entropy(torch.softmax(torch.bmm(p_bar, text_features_g.float()) / args.temperature, dim=-1))
+		if spec == "post_q":
+			drv = _rank_match(drv, U)
+	elif spec == "resid_q":
+		drv = _rank_match(1.0 - ret["raw_logits"].float().max(dim=-1).values, U)
+	elif spec == "edge_q":
+		drv = _rank_match(_edge_tokens(images_g, H), U)
+	else:
+		raise ValueError(f"unknown map variant '{spec}'")
+	calib_map = F.interpolate(drv.view(B, 1, H, H), size=size, mode="bilinear", align_corners=False).squeeze(1)
+	seg_prob = entropy_adaptive_softmax(
+		sim_logits=sim_logits, calib_map=calib_map,
+		min_temperature=args.temperature, max_temperature=args.max_temperature)
+	return seg_prob[:, 1:, :, :].sum(dim=1)
+
+
+def evaluate_variant_object(payload):
+	"""Pixel AUROC, AUPRO, image AUROC and AP of one object under one variant."""
+	spec, obj, gt_px, pr_px, gt_sp, pr_sp = payload
+	gt_px = np.stack(gt_px)
+	pr_px = np.stack(pr_px)
+	gt_sp = np.array(gt_sp)
+	pr_sp = np.array(pr_sp)
+	both = len(np.unique(gt_sp)) > 1
+	return spec, obj, {
+		"auroc_px": roc_auc_score(gt_px.ravel(), pr_px.ravel()),
+		"aupro": cal_pro_score_fast(gt_px, pr_px),
+		"auroc_sp": roc_auc_score(gt_sp, pr_sp) if both else float("nan"),
+		"ap_sp": average_precision_score(gt_sp, pr_sp) if both else float("nan"),
+	}
 
 
 def compute_global_image_score(
@@ -882,9 +1013,7 @@ def test(args):
 	logger.info(f"Semantic embedding tensor shape: {tuple(semantic_embeddings.shape)}")
 
 	checkpoint = torch.load(args.checkpoint_path, map_location=device)
-
-	if "hybrid_codebook" not in checkpoint:
-		raise KeyError(f"No 'hybrid_codebook' in checkpoint. Available keys: {list(checkpoint.keys())}")
+	variants_requested = list(args.map_variants or [])
 
 	# checkpoints trained with --no_image_branch have no adaptor; only the
 	# codebook-routed global score needs one
@@ -894,84 +1023,84 @@ def test(args):
 			"--image_score_mode global needs a checkpoint trained with the global image adaptor."
 		)
 
-	hybrid_state = checkpoint["hybrid_codebook"]
-
-	# train.py --per_layer_codebook saves one codebook per feature layer
-	per_layer = bool(checkpoint.get("per_layer_codebook", False))
-	if per_layer:
-		saved_list = [hybrid_state[f"{l}.learnable_entries"] for l in range(len(args.features_list))]
+	# train.py --no_codebook: the adapted patch feature is scored as it is, at one
+	# temperature; nothing that needs a codebook (U, its controls, the diagnostics) applies
+	no_codebook = bool(checkpoint.get("no_codebook", False))
+	if no_codebook:
+		bad = [v for v in variants_requested if not v.split("@")[0].startswith("fixed:")]
+		if args.cali or bad or args.semantic_calibration or args.residual_diag or args.with_semantic_codebook:
+			raise ValueError(
+				"checkpoint has no codebook: score it with --no-cali and fixed:T map variants only "
+				f"(got cali={args.cali}, variants {bad})")
+		codebooks = [NoCodebook()] * len(args.features_list)
+		hybrid_codebook = codebooks[-1]
+		logger.info("No codebook: the continuous adapted patch feature is scored at a fixed temperature.")
 	else:
+		if "hybrid_codebook" not in checkpoint:
+			raise KeyError(f"No 'hybrid_codebook' in checkpoint. Available keys: {list(checkpoint.keys())}")
+
+		hybrid_state = checkpoint["hybrid_codebook"]
 		if "learnable_entries" not in hybrid_state:
 			raise KeyError(
 				f"'learnable_entries' not found in checkpoint['hybrid_codebook']. "
 				f"Available keys: {list(hybrid_state.keys())}"
 			)
-		saved_list = [hybrid_state["learnable_entries"]]
+		saved_learnable = hybrid_state["learnable_entries"]
+		num_learnable = saved_learnable.shape[0]
 
-	saved_learnable = saved_list[0]
-	num_learnable = saved_learnable.shape[0]
+		calib_entries = None
+		if args.semantic_calibration or args.residual_diag:
+			if args.calib_control == "random":
+				# Same count, same norm, no semantics: isolates the effect of enlarging
+				# the assignment distribution from the effect of what was added to it.
+				g = torch.Generator(device="cpu").manual_seed(args.seed)
+				calib_entries = F.normalize(
+					torch.randn(semantic_embeddings.shape, generator=g), dim=-1
+				).to(device=device, dtype=semantic_embeddings.dtype)
+				logger.info(
+					"CONTROL --calib_control random: %d random unit directions replace the "
+					"text entries on the calibration path.", calib_entries.shape[0]
+				)
+			else:
+				calib_entries = semantic_embeddings
 
-	calib_entries = None
-	if args.semantic_calibration or args.residual_diag:
-		if args.calib_control == "random":
-			# Same count, same norm, no semantics: isolates the effect of enlarging
-			# the assignment distribution from the effect of what was added to it.
-			g = torch.Generator(device="cpu").manual_seed(args.seed)
-			calib_entries = F.normalize(
-				torch.randn(semantic_embeddings.shape, generator=g), dim=-1
-			).to(device=device, dtype=semantic_embeddings.dtype)
-			logger.info(
-				"CONTROL --calib_control random: %d random unit directions replace the "
-				"text entries on the calibration path.", calib_entries.shape[0]
-			)
-		else:
-			calib_entries = semantic_embeddings
-
-	def make_codebook(entries):
-		cb = HybridCodebook(
+		hybrid_codebook = HybridCodebook(
 			semantic_embeddings=semantic_embeddings if args.with_semantic_codebook else None,
 			calib_semantic_embeddings=calib_entries,
-			num_learnable=entries.shape[0],
+			num_learnable=num_learnable,
 			embed_dim=semantic_embeddings.shape[-1],
 			beta=args.beta
 		).to(device)
 		with torch.no_grad():
-			cb.learnable_entries.copy_(entries.to(device))
-		return cb.eval()
+			hybrid_codebook.learnable_entries.copy_(saved_learnable.to(device))
+		hybrid_codebook.eval()
+		# one codebook shared by all feature layers
+		codebooks = [hybrid_codebook] * len(args.features_list)
 
-	# codebooks[l] quantizes feature layer l; with a shared codebook every entry
-	# is the same module. hybrid_codebook names the last one for the diagnostics.
-	codebooks = [make_codebook(e) for e in saved_list]
-	if not per_layer:
-		codebooks = codebooks * len(args.features_list)
-	hybrid_codebook = codebooks[-1]
-	if per_layer:
-		logger.info(f"Per-layer codebooks: {len(codebooks)} x {num_learnable} entries.")
+		if args.with_semantic_codebook:
+			logger.info(
+				f"ABLATION --with_semantic_codebook: appended target-vocabulary entries "
+				f"with shape {tuple(semantic_embeddings.shape)}; these are selected for "
+				f"well under 1%% of patches (see the usage line below)."
+			)
+		else:
+			logger.info(
+				"Quantizing against the trained prototypes only; no target vocabulary "
+				"is added to the codebook."
+			)
 
-	if args.with_semantic_codebook:
+		if args.semantic_calibration:
+			logger.info(
+				f"CALIBRATION-PATH HYBRID: {semantic_embeddings.shape[0]} target-vocabulary "
+				f"entries enter the assignment distribution only. Assignment, quantized "
+				f"value and text-anchor scoring are unchanged; the entropy that sets the "
+				f"per-pixel temperature is now taken over {num_learnable} prototypes plus "
+				f"{semantic_embeddings.shape[0]} named concepts."
+			)
 		logger.info(
-			f"ABLATION --with_semantic_codebook: appended target-vocabulary entries "
-			f"with shape {tuple(semantic_embeddings.shape)}; these are selected for "
-			f"well under 1%% of patches (see the usage line below)."
+			f"Loaded only learnable_entries from checkpoint with shape "
+			f"{tuple(saved_learnable.shape)}."
 		)
-	else:
-		logger.info(
-			"Quantizing against the trained prototypes only; no target vocabulary "
-			"is added to the codebook."
-		)
-
-	if args.semantic_calibration:
-		logger.info(
-			f"CALIBRATION-PATH HYBRID: {semantic_embeddings.shape[0]} target-vocabulary "
-			f"entries enter the assignment distribution only. Assignment, quantized "
-			f"value and text-anchor scoring are unchanged; the entropy that sets the "
-			f"per-pixel temperature is now taken over {num_learnable} prototypes plus "
-			f"{semantic_embeddings.shape[0]} named concepts."
-		)
-	logger.info(
-		f"Loaded only learnable_entries from checkpoint with shape "
-		f"{tuple(saved_learnable.shape)}."
-	)
 
 	with open(args.config_path, "r") as f:
 		model_configs = json.load(f)
@@ -1012,6 +1141,16 @@ def test(args):
 	map_scores = {}		# image path -> map term of the image score, for --dump_image_scores
 	dump_root = os.path.join(args.save_path, "dump") if args.dump_maps else None
 
+	# --map_variants: each object is evaluated as soon as the class-ordered loader
+	# has moved past it, so no variant ever holds a whole dataset of maps.
+	variants = list(args.map_variants or [])
+	var_bases = sorted({v.split("@")[0] for v in variants})
+	var_store = {v: defaultdict(lambda: ([], [], [], [])) for v in variants}
+	var_done = set()
+	var_futures = []
+	var_pool = ProcessPoolExecutor(max_workers=args.eval_workers) if variants else None
+	var_gen = torch.Generator().manual_seed(args.seed)
+
 	# Diagnostic: how often the semantic half of the codebook is actually selected.
 	# If this is ~0 the test-time extension is inert, whatever the metrics say.
 	assign_sem = 0
@@ -1050,9 +1189,6 @@ def test(args):
 			image_features, patch_tokens = model.encode_image(images, args.features_list)
 
 			patch_tokens = linearlayer(patch_tokens)
-			if args.tta_flip:		# mirrored pass, averaged into the map below
-				_, patch_tokens_flip = model.encode_image(torch.flip(images, dims=[3]), args.features_list)
-				patch_tokens_flip = linearlayer(patch_tokens_flip)
 
 			grouped_indices = defaultdict(list)
 			for i, cls_name in enumerate(cls_names):
@@ -1088,6 +1224,8 @@ def test(args):
 						pr_sp_list[global_i] = pr_sp_g[local_i].detach().cpu().item()
 
 				acc_map = None
+				var_acc = {b: None for b in var_bases}
+				images_g = images.index_select(0, idx_tensor) if var_bases else None
 
 				for layer_idx in range(len(patch_tokens)):
 					layer_tokens = extract_patch_tokens_for_layer(
@@ -1149,58 +1287,41 @@ def test(args):
 								n_def = sum(1 for s in sem_defects if s.lower() == d)
 								resid_chance_defect += n_def / len(sem_defects)
 
-					if args.score_blend > 0.0:
-						# Blend the raw CLIP patch feature with the hard-quantized code
-						# to retain the fine deviation that nearest-prototype
-						# quantization discards (alpha=0 -> current, alpha=1 -> raw).
-						raw_patch = F.normalize(layer_tokens, dim=-1)
-						zq_patch = F.normalize(patch_q, dim=-1)
-						patch_used = F.normalize(
-							args.score_blend * raw_patch + (1.0 - args.score_blend) * zq_patch,
-							dim=-1
-						)
-					else:
-						patch_used = F.normalize(patch_q, dim=-1)
-
-					# Raw similarity logits, not divided by temperature yet.
-					sim_logits = torch.bmm(patch_used, text_features_g)
-
-					Bg, L, C = sim_logits.shape
-					H = int(np.sqrt(L))
-
-					if H * H != L:
-						raise ValueError(f"L={L} is not square.")
-
-					sim_logits = F.interpolate(
-						sim_logits.permute(0, 2, 1).contiguous().view(Bg, C, H, H),
-						size=(args.image_size, args.image_size),
-						mode="bilinear",
-						align_corners=True
-					)
-
-					if args.cali:
-						calib_map = build_calibration_map(
-							assign_probs=assign_probs,
-							img_size=args.image_size
-						)
-
-						seg_prob = entropy_adaptive_softmax(
-							sim_logits=sim_logits,
-							calib_map=calib_map,
-							min_temperature=args.temperature,
-							max_temperature=args.max_temperature
-						)
-					else:
-						seg_prob = torch.softmax(sim_logits / args.temperature, dim=1)
-
-					layer_map = seg_prob[:, 1:, :, :].sum(dim=1)
+					patch_used = F.normalize(patch_q, dim=-1)
+					layer_map = layer_anomaly_map(ret, patch_used, text_features_g, args)
 
 					acc_map = layer_map if acc_map is None else acc_map + layer_map
 
+					for b in var_bases:
+						vm = variant_layer_map(b, ret, patch_used, layer_tokens, text_features_g, images_g, args, var_gen)
+						var_acc[b] = vm if var_acc[b] is None else var_acc[b] + vm
+
+				for v in variants:
+					b, _, smoothing = v.partition("@")
+					vmap = var_acc[b] / len(patch_tokens)
+					if smoothing == "":
+						vmap = gaussian_blur_maps(vmap, args.smooth_sigma)
+					elif smoothing == "reflect":
+						vmap = gaussian_blur_maps(vmap, args.smooth_sigma, padding="reflect")
+					elif smoothing != "sigma0":
+						raise ValueError(f"unknown smoothing in map variant '{v}'")
+					flat = vmap.reshape(vmap.shape[0], -1)
+					s_map = torch.stack([
+						torch.topk(flat, max(1, int(round(r * flat.shape[1]))), dim=1).values.mean(dim=1).float()
+						for r in args.topk_ratio
+					], dim=1).mean(dim=1)
+					gt_px, pr_px, gt_sp, pr_sp = var_store[v][cls_name]
+					for local_i, global_i in enumerate(indices):
+						s = s_map[local_i].item()
+						if global_scores is not None:
+							w = args.global_fusion_weight
+							s = (1.0 - w) * s + w * global_scores[img_paths[global_i]]
+						gt_px.append(np.squeeze(gt_masks[global_i].numpy()).astype(np.uint8))
+						pr_px.append(vmap[local_i].float().cpu().numpy())
+						gt_sp.append(int(items["anomaly"][global_i].item()))
+						pr_sp.append(s)
+
 				acc_map = acc_map / len(patch_tokens)
-				if args.tta_flip:
-					acc_flip = anomaly_map_from_tokens(patch_tokens_flip, idx_tensor, text_features_g, codebooks, args)
-					acc_map = 0.5 * (acc_map + torch.flip(acc_flip, dims=[-1]))
 				acc_map = gaussian_blur_maps(acc_map, args.smooth_sigma)
 
 				# Image-level score from top-k mean of the pixel anomaly map. With several
@@ -1232,10 +1353,10 @@ def test(args):
 
 			results["cls_names"].append(cls_name)
 			results["img_paths"].append(img_path)
-			results["imgs_masks"].append(gt_masks[b:b+1])
+			results["imgs_masks"].append(None if args.skip_main_eval else gt_masks[b:b+1])
 			results["gt_sp"].append(items["anomaly"][b].item())
 			results["pr_sp"].append(pr_sp_list[b])
-			results["anomaly_maps"].append(anomaly_map_np)
+			results["anomaly_maps"].append(None if args.skip_main_eval else anomaly_map_np)
 
 			if args.save_vis:
 				save_visualization(
@@ -1276,6 +1397,39 @@ def test(args):
 					"image_score": float(pr_sp_list[b]),
 					"img_path": img_path,
 				})
+
+		if variants:
+			batch_classes = set(cls_names)
+			if batch_classes & var_done:
+				raise RuntimeError("--map_variants needs a class-ordered loader, but a finished class reappeared")
+			for cls in [c for c in var_store[variants[0]] if c not in batch_classes]:
+				for v in variants:
+					var_futures.append(var_pool.submit(evaluate_variant_object, (v, cls, *var_store[v].pop(cls))))
+				var_done.add(cls)
+				# backpressure: at most two objects' worth of payloads waiting
+				while sum(not f.done() for f in var_futures) > 2 * len(variants):
+					time.sleep(1.0)
+
+	if variants:
+		for cls in list(var_store[variants[0]]):
+			for v in variants:
+				var_futures.append(var_pool.submit(evaluate_variant_object, (v, cls, *var_store[v].pop(cls))))
+		var_metrics = defaultdict(dict)
+		for f in tqdm(as_completed(var_futures), total=len(var_futures), desc="Map variants", leave=True):
+			v, obj, m = f.result()
+			var_metrics[v][obj] = m
+		var_pool.shutdown()
+		keys = ("auroc_px", "aupro", "auroc_sp", "ap_sp")
+		summary = {}
+		for v in variants:
+			objs = [o for o in obj_list if o in var_metrics[v]]
+			summary[v] = {k: 100.0 * float(np.nanmean([var_metrics[v][o][k] for o in objs])) for k in keys}
+			summary[v]["per_object"] = {o: {k: 100.0 * float(var_metrics[v][o][k]) for k in keys} for o in objs}
+		with open(os.path.join(args.save_path, "variants.json"), "w") as fh:
+			json.dump(summary, fh, indent=1)
+		logger.info("map variants (mean over objects):\n%s", tabulate(
+			[[v] + [f"{summary[v][k]:.2f}" for k in keys] for v in variants],
+			headers=["variant", *keys], tablefmt="pipe"))
 
 	if dump_records is not None:
 		for cls_name, recs in dump_records.items():
@@ -1321,6 +1475,9 @@ def test(args):
 			global_score=np.array([global_scores[p] if global_scores is not None else np.nan for p in paths], dtype=np.float64),
 		)
 
+	if args.skip_main_eval:
+		logger.info("--skip_main_eval: no evaluation of the reported map beyond --map_variants")
+		return
 	table_str = evaluate_metrics(
 		results=results,
 		obj_list=obj_list,
@@ -1363,7 +1520,6 @@ if __name__ == "__main__":
 	parser.add_argument("--global_crop_npz", type=str, default="", help="with --global_scores_npz: load the tile scores from a tools/global_crop_scores.py output")
 	parser.add_argument("--global_image_size", type=int, default=336, help="input size of the frozen CLIP that computes the global score (its native resolution)")
 	parser.add_argument("--split", type=str, default="test", help="dataset split to evaluate; use 'valid' to tune hyperparameters off-test (bmad only)")
-	parser.add_argument("--score_blend", type=float, default=0.0, help="pixel scoring: convex blend alpha*raw_patch + (1-alpha)*z_q before text similarity (0 = hard quantization, the paper; 1 = raw CLIP feature)")
 
 	# runtime
 	parser.add_argument("--seed", type=int, default=42, help="random seed")
@@ -1388,8 +1544,9 @@ if __name__ == "__main__":
 	parser.add_argument("--calib_control", type=str, default="text", choices=["text", "random"], help="control for --semantic_calibration. Adding N near-zero-probability entries lowers the normalized entropy mechanically, because it is divided by log(K+N); 'random' substitutes N random unit directions for the text entries so that any gain from 'text' can be attributed to semantics rather than to the count")
 
 	# pixel calibration
+	parser.add_argument("--skip_main_eval", action="store_true", help="keep no maps of the reported setting and skip its evaluation (use with --map_variants sched, which reproduces it, to save memory and time)")
+	parser.add_argument("--map_variants", type=str, nargs="*", default=[], help="temperature controls computed alongside the reported map and evaluated per object into save_path/variants.json; see the comment above variant_layer_map (e.g. sched fixed:0.01 meanT shuffle U post resid_q edge_q sched@sigma0 sched@reflect)")
 	parser.add_argument("--cali", action=argparse.BooleanOptionalAction, default=True, help="entropy-adaptive temperature for the pixel map (on in the paper); --no-cali scores every pixel at --temperature")
-	parser.add_argument("--tta_flip", action="store_true", help="average the anomaly map with that of the horizontally flipped image (flipped back) before smoothing")
 
 	# evaluation
 	parser.add_argument("--eval_workers", type=int, default=4, help="number of processes for metric evaluation")
